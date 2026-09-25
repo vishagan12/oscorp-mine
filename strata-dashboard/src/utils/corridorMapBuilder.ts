@@ -37,25 +37,41 @@ export interface CorridorMapModel {
 }
 
 // 1. Precomputed Static Tunnel Geometry (Allocated once at startup, 0 runtime GC overhead)
-const STATIC_MAIN_HAULAGE: { x: number; y: number }[] = [];
-for (let x = -190; x <= 260; x += 15) {
-  STATIC_MAIN_HAULAGE.push({ x, y: Math.sin(x * 0.018) * 35 });
-}
+export const STATIC_MAIN_HAULAGE: { x: number; y: number }[] = [
+  { x: -185, y: 0 },
+  { x: -140, y: 0 },
+  { x: -100, y: 0 },
+  { x: -60, y: 0 },   // Junction South
+  { x: -25, y: 7 },
+  { x: 10, y: 15 },
+  { x: 40, y: 20 },   // Junction North
+  { x: 80, y: 22 },
+  { x: 120, y: 22 },
+  { x: 160, y: 20 },  // Junction East
+  { x: 200, y: 12 },
+  { x: 240, y: 0 }    // Main Haulage East Terminus
+];
 
-const STATIC_NORTH_CROSSCUT: { x: number; y: number }[] = [];
-for (let y = 15; y >= -130; y -= 15) {
-  STATIC_NORTH_CROSSCUT.push({ x: 40, y });
-}
+export const STATIC_SOUTH_DECLINE: { x: number; y: number }[] = [
+  { x: -60, y: 0 },   // Connects to Main Haulage
+  { x: -60, y: 35 },
+  { x: -60, y: 70 },
+  { x: -60, y: 105 }  // Ventilation Shaft South
+];
 
-const STATIC_SOUTH_DECLINE: { x: number; y: number }[] = [];
-for (let y = -5; y <= 110; y += 15) {
-  STATIC_SOUTH_DECLINE.push({ x: -70, y });
-}
+export const STATIC_NORTH_CROSSCUT: { x: number; y: number }[] = [
+  { x: 40, y: 20 },   // Connects to Main Haulage
+  { x: 40, y: -20 },
+  { x: 40, y: -65 },
+  { x: 40, y: -115 }  // North Stope Face
+];
 
-const STATIC_EAST_STOPE: { x: number; y: number }[] = [];
-for (let x = 170; x <= 290; x += 15) {
-  STATIC_EAST_STOPE.push({ x, y: 30 + Math.cos((x - 170) * 0.025) * 20 });
-}
+export const STATIC_EAST_STOPE: { x: number; y: number }[] = [
+  { x: 160, y: 20 },  // Connects to Main Haulage
+  { x: 195, y: 36 },
+  { x: 230, y: 48 },
+  { x: 270, y: 55 }   // Sub-Level 08 Heading
+];
 
 // Helper to create Path2D for points at 2.2 coordinate scale
 function createSegmentPath(points: readonly { x: number; y: number }[]): Path2D {
@@ -73,11 +89,11 @@ const PATH_NORTH = createSegmentPath(STATIC_NORTH_CROSSCUT);
 const PATH_SOUTH = createSegmentPath(STATIC_SOUTH_DECLINE);
 const PATH_EAST = createSegmentPath(STATIC_EAST_STOPE);
 
-// Pre-measured dimension callouts
-const DIMENSION_MAIN = { x: -40, y: 28, widthText: '↔ 3.2m WIDTH', lengthText: '85m MAIN DRIFT', textWidth: 148 };
-const DIMENSION_NORTH = { x: 48, y: -65, widthText: '↔ 2.4m WIDTH', lengthText: '35m TO STOPE', textWidth: 142 };
-const DIMENSION_SOUTH = { x: -62, y: 65, widthText: '↔ 2.8m WIDTH', lengthText: '38m TO SHAFT', textWidth: 144 };
-const DIMENSION_EAST = { x: 230, y: 55, widthText: '↔ 2.6m WIDTH', lengthText: '28m EXPLORED', textWidth: 140 };
+// Pre-measured dimension callouts positioned along actual corridors
+const DIMENSION_MAIN = { x: -30, y: -16, widthText: '↔ 3.2m WIDTH', lengthText: '85m MAIN DRIFT', textWidth: 148 };
+const DIMENSION_NORTH = { x: 58, y: -50, widthText: '↔ 2.4m WIDTH', lengthText: '35m TO STOPE', textWidth: 142 };
+const DIMENSION_SOUTH = { x: -44, y: 55, widthText: '↔ 2.8m WIDTH', lengthText: '38m TO SHAFT', textWidth: 144 };
+const DIMENSION_EAST = { x: 220, y: 65, widthText: '↔ 2.6m WIDTH', lengthText: '28m EXPLORED', textWidth: 140 };
 
 /**
  * Pure function: buildCorridorPath
@@ -156,8 +172,8 @@ export function buildCorridorPath(
     {
       id: 'exit-a',
       label: 'EXIT A — 45m',
-      x: -190,
-      y: Math.sin(-190 * 0.018) * 35,
+      x: -185,
+      y: 0,
       distanceMeters: 45,
       status: evacActive && currentGas > 500 ? 'blocked' : 'open'
     },
@@ -165,7 +181,7 @@ export function buildCorridorPath(
       id: 'exit-b',
       label: 'EXIT B — 110m',
       x: 40,
-      y: -130,
+      y: -115,
       distanceMeters: 110,
       status: northStatus === 'blocked' ? 'blocked' : 'open'
     }

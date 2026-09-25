@@ -56,19 +56,69 @@ interface MineNavNode {
 }
 
 const MINE_NAV_GRAPH: Record<string, MineNavNode> = {
-  portal: { id: 'portal', name: 'Portal Entry 01', x: -180, y: -5, neighbors: ['haulage_west'] },
-  haulage_west: { id: 'haulage_west', name: 'West Haulage Drift', x: -125, y: -7, neighbors: ['portal', 'junction_south'] },
-  junction_south: { id: 'junction_south', name: 'South Decline Junction', x: -70, y: -5, neighbors: ['haulage_west', 'mid_south', 'junction_mid'] },
-  mid_south: { id: 'mid_south', name: 'South Ventilation Incline', x: -70, y: 55, neighbors: ['junction_south', 'vent_south'] },
-  vent_south: { id: 'vent_south', name: 'Ventilation Shaft South', x: -70, y: 105, neighbors: ['mid_south'] },
-  junction_mid: { id: 'junction_mid', name: 'Central Haulage Drift', x: -15, y: -2, neighbors: ['junction_south', 'junction_north'] },
-  junction_north: { id: 'junction_north', name: 'North Crosscut Junction', x: 40, y: 15, neighbors: ['junction_mid', 'mid_north', 'junction_east'] },
-  mid_north: { id: 'mid_north', name: 'North Extraction Crosscut', x: 40, y: -60, neighbors: ['junction_north', 'stope_north'] },
-  stope_north: { id: 'stope_north', name: 'North Stope Face', x: 40, y: -125, neighbors: ['mid_north'] },
-  junction_east: { id: 'junction_east', name: 'Sub-Level 08 Split', x: 170, y: 25, neighbors: ['junction_north', 'sublevel_east', 'main_east'] },
-  sublevel_east: { id: 'sublevel_east', name: 'Sub-Level 08 Heading', x: 275, y: 55, neighbors: ['junction_east'] },
-  main_east: { id: 'main_east', name: 'Main Haulage East Face', x: 245, y: -10, neighbors: ['junction_east'] },
+  portal: { id: 'portal', name: 'Portal Entry 01', x: -180, y: 0, neighbors: ['haulage_west'] },
+  haulage_west: { id: 'haulage_west', name: 'West Haulage Drift', x: -120, y: 0, neighbors: ['portal', 'junction_south'] },
+  junction_south: { id: 'junction_south', name: 'South Decline Junction', x: -60, y: 0, neighbors: ['haulage_west', 'mid_south', 'haulage_mid'] },
+  mid_south: { id: 'mid_south', name: 'South Ventilation Incline', x: -60, y: 55, neighbors: ['junction_south', 'vent_south'] },
+  vent_south: { id: 'vent_south', name: 'Ventilation Shaft South', x: -60, y: 105, neighbors: ['mid_south'] },
+  haulage_mid: { id: 'haulage_mid', name: 'Central Haulage Drift', x: -10, y: 10, neighbors: ['junction_south', 'junction_north'] },
+  junction_north: { id: 'junction_north', name: 'North Crosscut Junction', x: 40, y: 20, neighbors: ['haulage_mid', 'mid_north', 'haulage_east'] },
+  mid_north: { id: 'mid_north', name: 'North Extraction Crosscut', x: 40, y: -45, neighbors: ['junction_north', 'stope_north'] },
+  stope_north: { id: 'stope_north', name: 'North Stope Active Face', x: 40, y: -115, neighbors: ['mid_north'] },
+  haulage_east: { id: 'haulage_east', name: 'East Haulage Drift', x: 100, y: 22, neighbors: ['junction_north', 'junction_east'] },
+  junction_east: { id: 'junction_east', name: 'Sub-Level 08 Split', x: 160, y: 20, neighbors: ['haulage_east', 'sublevel_mid', 'haulage_terminus'] },
+  sublevel_mid: { id: 'sublevel_mid', name: 'Sub-Level 08 Incline', x: 215, y: 42, neighbors: ['junction_east', 'sublevel_east'] },
+  sublevel_east: { id: 'sublevel_east', name: 'Sub-Level 08 Heading', x: 270, y: 55, neighbors: ['sublevel_mid'] },
+  haulage_terminus: { id: 'haulage_terminus', name: 'Main Haulage East Face', x: 240, y: 0, neighbors: ['junction_east'] },
 };
+
+// Tunnel segments for exact physical distance computation
+const TUNNEL_SEGMENTS: [number, number, number, number][] = [
+  // Main haulage
+  [-185, 0, -140, 0],
+  [-140, 0, -100, 0],
+  [-100, 0, -60, 0],
+  [-60, 0, -25, 7],
+  [-25, 7, 10, 15],
+  [10, 15, 40, 20],
+  [40, 20, 80, 22],
+  [80, 22, 120, 22],
+  [120, 22, 160, 20],
+  [160, 20, 200, 12],
+  [200, 12, 240, 0],
+  // South decline
+  [-60, 0, -60, 35],
+  [-60, 35, -60, 70],
+  [-60, 70, -60, 105],
+  // North crosscut
+  [40, 20, 40, -20],
+  [40, -20, 40, -65],
+  [40, -65, 40, -115],
+  // Sub-level 08 access
+  [160, 20, 195, 36],
+  [195, 36, 230, 48],
+  [230, 48, 270, 55]
+];
+
+function distToSegment(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
+function minDistanceToTunnelNetwork(px: number, py: number): number {
+  let minD = Infinity;
+  for (let i = 0; i < TUNNEL_SEGMENTS.length; i++) {
+    const s = TUNNEL_SEGMENTS[i];
+    const d = distToSegment(px, py, s[0], s[1], s[2], s[3]);
+    if (d < minD) minD = d;
+  }
+  return minD;
+}
 
 export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
@@ -81,7 +131,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [hexapod, setHexapod] = useState<HexapodState>({
     x: -180,
-    y: -5,
+    y: 0,
     heading: 0,
     battery: 92,
     signalDbm: -60,
@@ -97,7 +147,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   });
 
   const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
-  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: -180, y: -5 }]);
+  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: -180, y: 0 }]);
   const [activeScanBeams, setActiveScanBeams] = useState<{ x1: number; y1: number; x2: number; y2: number; hit: boolean }[]>([]);
 
   const [alerts, setAlerts] = useState<AlertItem[]>([
@@ -129,52 +179,20 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     if (!simulationRunning) return;
 
-    // Geometric wall collision detector covering all 4 subterranean tunnel drifts
+    // Physical LiDAR ray tracer testing distance to tunnel walls (half-width = 15.5m)
     const getTunnelDistance = (x: number, y: number, angleDeg: number): number => {
       const rad = (angleDeg * Math.PI) / 180;
       const cosA = Math.cos(rad);
       const sinA = Math.sin(rad);
 
-      for (let d = 4; d < 75; d += 1) {
+      for (let d = 3; d < 72; d += 1.5) {
         const testX = x + cosA * d;
         const testY = y + sinA * d;
 
-        // Check if test point is inside ANY tunnel corridor
-        let insideTunnel = false;
-
-        // 1. Main Haulage: x: -195 to 265, y: sin(x * 0.018)*35, half-width: 17
-        if (testX >= -195 && testX <= 265) {
-          const centerY = Math.sin(testX * 0.018) * 35;
-          if (Math.abs(testY - centerY) <= 17) {
-            insideTunnel = true;
-          }
-        }
-
-        // 2. North Crosscut: x: 40, y: -135 to 20, half-width: 15
-        if (!insideTunnel && testY >= -135 && testY <= 20) {
-          if (Math.abs(testX - 40) <= 15) {
-            insideTunnel = true;
-          }
-        }
-
-        // 3. South Ventilation Decline: x: -70, y: -10 to 115, half-width: 16
-        if (!insideTunnel && testY >= -10 && testY <= 115) {
-          if (Math.abs(testX - (-70)) <= 16) {
-            insideTunnel = true;
-          }
-        }
-
-        // 4. East Stope / Sub-Level: x: 165 to 295, half-width: 15
-        if (!insideTunnel && testX >= 165 && testX <= 295) {
-          const centerY = 30 + Math.cos((testX - 170) * 0.025) * 20;
-          if (Math.abs(testY - centerY) <= 15) {
-            insideTunnel = true;
-          }
-        }
-
-        // If point stepped outside all corridors, that's where the LiDAR ray strikes the rock wall
-        if (!insideTunnel) {
-          return d + (Math.random() - 0.5) * 0.8;
+        const distToCenterline = minDistanceToTunnelNetwork(testX, testY);
+        // Wall boundary at 15.2 meters with minor surface roughness
+        if (distToCenterline >= 15.2) {
+          return d + (Math.random() - 0.5) * 0.5;
         }
       }
       return 70;
@@ -189,7 +207,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         const distToTarget = Math.hypot(dx, dy);
 
         // When reaching a junction or dead-end, choose a new random connected corridor!
-        if (distToTarget < 7) {
+        if (distToTarget < 6) {
           const prevId = lastNodeIdRef.current;
           lastNodeIdRef.current = targetNode.id;
 
@@ -221,29 +239,31 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.5);
 
+        // Cast 36 High-Resolution 360-Degree LiDAR Beams
         const beams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] = [];
         const newPointsBatch: MapPoint[] = [];
 
-        for (let i = 0; i < 19; i++) {
-          const angleDeg = newHeading - 90 + (i * 10);
+        for (let i = 0; i < 36; i++) {
+          const angleDeg = (i * 10 + newHeading) % 360;
           const dist = getTunnelDistance(newX, newY, angleDeg);
           const rad = (angleDeg * Math.PI) / 180;
           const px = newX + dist * Math.cos(rad);
           const py = newY + dist * Math.sin(rad);
 
+          const hit = dist < 65;
           beams.push({
             x1: newX,
             y1: newY,
             x2: px,
             y2: py,
-            hit: dist < 65
+            hit
           });
 
-          if (dist < 65) {
+          if (hit) {
             newPointsBatch.push({
               x: px,
               y: py,
-              gasPpm: currentGas + (Math.random() - 0.5) * 15
+              gasPpm: currentGas + (Math.random() - 0.5) * 10
             });
           }
         }
@@ -252,7 +272,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         setMapPoints((old) => {
           const combined = [...old, ...newPointsBatch];
-          return combined.length > 1500 ? combined.slice(combined.length - 1500) : combined;
+          return combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
         });
 
         // Store up to 1000 points so the entire multi-branch route persists like Google Maps

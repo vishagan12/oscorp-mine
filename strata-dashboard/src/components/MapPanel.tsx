@@ -5,7 +5,7 @@ import { buildCorridorPath } from '../utils/corridorMapBuilder';
 export { buildCorridorPath };
 
 export default function MapPanel() {
-  const { hexapod, mapPoints, mapPath, evacActive } = useDashboard();
+  const { hexapod, mapPoints, mapPath, activeScanBeams, evacActive } = useDashboard();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -165,11 +165,46 @@ export default function MapPanel() {
         ctx.fillText(isBlocked ? '✕ EXIT BLOCKED' : exit.label, ex + 6, ey - 12);
       });
 
+      // 4b. Cumulative Scanned SLAM Point Cloud
+      if (mapPoints.length > 0) {
+        ctx.save();
+        for (let i = 0; i < mapPoints.length; i++) {
+          const pt = mapPoints[i];
+          ctx.fillStyle = pt.gasPpm > 450 ? 'rgba(239, 68, 68, 0.85)' : pt.gasPpm > 300 ? 'rgba(245, 158, 11, 0.85)' : 'rgba(5, 150, 105, 0.70)';
+          ctx.fillRect(pt.x * 2.2 - 1.2, pt.y * 2.2 - 1.2, 2.4, 2.4);
+        }
+        ctx.restore();
+      }
+
+      // 4c. Real-Time 360-Degree LiDAR Rays & Impact Sparks
+      if (activeScanBeams && activeScanBeams.length > 0) {
+        ctx.save();
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.38)';
+        for (let i = 0; i < activeScanBeams.length; i++) {
+          const b = activeScanBeams[i];
+          ctx.beginPath();
+          ctx.moveTo(b.x1 * 2.2, b.y1 * 2.2);
+          ctx.lineTo(b.x2 * 2.2, b.y2 * 2.2);
+          ctx.stroke();
+        }
+
+        for (let i = 0; i < activeScanBeams.length; i++) {
+          const b = activeScanBeams[i];
+          if (!b.hit) continue;
+          ctx.fillStyle = '#06B6D4';
+          ctx.beginPath();
+          ctx.arc(b.x2 * 2.2, b.y2 * 2.2, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
       // 5. Centerline Traveled Path
       if (mapPath.length > 1) {
-        ctx.shadowColor = '#FF441A';
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = '#FF441A';
+        ctx.shadowColor = '#2563EB';
+        ctx.shadowBlur = 6;
+        ctx.strokeStyle = '#2563EB';
         ctx.lineWidth = 3.5;
         ctx.stroke(traveledPath2D);
         ctx.shadowBlur = 0;
@@ -214,7 +249,7 @@ export default function MapPanel() {
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading]);
+  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading, activeScanBeams, mapPoints]);
 
   return (
     <div className="bg-white rounded-2xl border border-[#E6DFD5] flex flex-col overflow-hidden shadow-sm h-full font-['Plus_Jakarta_Sans']">

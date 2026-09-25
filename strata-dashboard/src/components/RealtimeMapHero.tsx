@@ -3,12 +3,14 @@ import { useDashboard } from '../context/DashboardContext';
 import { buildCorridorPath } from '../utils/corridorMapBuilder';
 
 export const RealtimeMapHero: React.FC = () => {
-  const { hexapod, mapPoints, mapPath, evacActive, clearMap } = useDashboard();
+  const { hexapod, mapPoints, mapPath, activeScanBeams, evacActive, clearMap } = useDashboard();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [zoom, setZoom] = useState<number>(1.15);
   const [followRobot, setFollowRobot] = useState<boolean>(true);
+  const [showLidar, setShowLidar] = useState<boolean>(true);
+  const [showPointCloud, setShowPointCloud] = useState<boolean>(true);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -109,16 +111,16 @@ export const RealtimeMapHero: React.FC = () => {
   const currentNavPrompt = useMemo(() => {
     const x = hexapod.x;
     const y = hexapod.y;
-    if (x < -100) {
-      return { icon: '↑', text: 'Proceed straight along Main Haulage Decline', dist: '55m to South Junction' };
-    } else if (x >= -100 && x < -20 && y > 30) {
-      return { icon: '↰', text: 'Exploring South Ventilation Decline', dist: '38m to Return Airway' };
-    } else if (x >= -20 && x < 80 && y < -20) {
-      return { icon: '↱', text: 'Surveying North Crosscut 01 (Stope Face)', dist: '25m to Active Face' };
-    } else if (x >= 80 && y > 20) {
-      return { icon: '↱', text: 'Mapping Sub-Level 08 Access Drift', dist: '40m to Heading' };
+    if (x < -60) {
+      return { icon: '↑', text: 'Proceed straight along Main Haulage Drift', dist: `${Math.max(4, Math.round(Math.abs(-60 - x)))}m to South Junction` };
+    } else if (x >= -75 && x <= -45 && y > 8) {
+      return { icon: '↰', text: 'Exploring South Ventilation Incline', dist: `${Math.max(4, Math.round(105 - y))}m to Shaft Terminus` };
+    } else if (x >= 25 && x <= 55 && y < 8) {
+      return { icon: '↱', text: 'Surveying North Extraction Crosscut', dist: `${Math.max(4, Math.round(Math.abs(-115 - y)))}m to Stope Face` };
+    } else if (x > 150 && y > 15) {
+      return { icon: '↱', text: 'Mapping Sub-Level 08 Access Drift', dist: `${Math.max(4, Math.round(270 - x))}m to Heading` };
     } else {
-      return { icon: '↑', text: 'Navigating Central Haulage Intersect', dist: 'Autonomous Corridor Selection' };
+      return { icon: '↑', text: 'Navigating Central Haulage Drift', dist: `${Math.max(4, Math.round(160 - x))}m to Sub-Level 08 Split` };
     }
   }, [hexapod.x, hexapod.y]);
 
@@ -246,6 +248,90 @@ export const RealtimeMapHero: React.FC = () => {
         ctx.fillText(text, cx, cy);
       });
 
+      // 3b. CUMULATIVE SCANNED SLAM POINT CLOUD (Revealed Wall Envelope)
+      if (showPointCloud && mapPoints.length > 0) {
+        ctx.save();
+        for (let i = 0; i < mapPoints.length; i++) {
+          const pt = mapPoints[i];
+          const px = pt.x * 2.2;
+          const py = pt.y * 2.2;
+          ctx.fillStyle = pt.gasPpm > 450
+            ? 'rgba(239, 68, 68, 0.85)'
+            : pt.gasPpm > 300
+            ? 'rgba(245, 158, 11, 0.85)'
+            : 'rgba(5, 150, 105, 0.70)';
+          ctx.beginPath();
+          ctx.arc(px, py, 1.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // 3c. DYNAMIC REAL-TIME 360-DEGREE LIDAR LASER BEAMS & WALL STRIKES
+      if (showLidar && activeScanBeams.length > 0) {
+        ctx.save();
+        const baseBeamColor = hexapod.gasPpm > 450
+          ? 'rgba(239, 68, 68, 0.45)'
+          : hexapod.gasPpm > 300
+          ? 'rgba(245, 158, 11, 0.40)'
+          : 'rgba(6, 182, 212, 0.38)';
+
+        const impactColor = hexapod.gasPpm > 450
+          ? '#EF4444'
+          : hexapod.gasPpm > 300
+          ? '#F59E0B'
+          : '#06B6D4';
+
+        // High-Tech Laser Rays
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = baseBeamColor;
+        for (let i = 0; i < activeScanBeams.length; i++) {
+          const b = activeScanBeams[i];
+          ctx.beginPath();
+          ctx.moveTo(b.x1 * 2.2, b.y1 * 2.2);
+          ctx.lineTo(b.x2 * 2.2, b.y2 * 2.2);
+          ctx.stroke();
+        }
+
+        // Wall Impact Sparks (glowing dots at the ends of hit rays)
+        for (let i = 0; i < activeScanBeams.length; i++) {
+          const b = activeScanBeams[i];
+          if (!b.hit) continue;
+          const hx = b.x2 * 2.2;
+          const hy = b.y2 * 2.2;
+
+          // Glowing spark center
+          ctx.fillStyle = impactColor;
+          ctx.beginPath();
+          ctx.arc(hx, hy, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Outer halo
+          ctx.fillStyle = hexapod.gasPpm > 450 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(6, 182, 212, 0.25)';
+          ctx.beginPath();
+          ctx.arc(hx, hy, 5.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // High-Speed Sweeping LiDAR Radar Line
+        const sweepAngle = (Date.now() / 6) % 360;
+        const sweepRad = (sweepAngle * Math.PI) / 180;
+        const sweepLen = 65 * 2.2;
+        const hx = hexapod.x * 2.2;
+        const hy = hexapod.y * 2.2;
+        const sx = hx + Math.cos(sweepRad) * sweepLen;
+        const sy = hy + Math.sin(sweepRad) * sweepLen;
+
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.35)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(sx, sy);
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
       // 4. GOOGLE MAPS STYLE NAVIGATION ROUTE (Double-Pass Route with Traffic Colors & Chevrons)
       if (mapPath.length > 1) {
         // Underlay Casing (Google Maps dark route outline)
@@ -347,12 +433,13 @@ export const RealtimeMapHero: React.FC = () => {
       };
 
       // Start Origin Pin [A]
-      drawGoogleMapsPin(-180 * 2.2, -5 * 2.2, 'A', '#16A34A', 'START · PORTAL 01');
+      drawGoogleMapsPin(-180 * 2.2, 0, 'A', '#16A34A', 'START · PORTAL 01');
 
       // Key Terminus & Destination Pins
-      drawGoogleMapsPin(40 * 2.2, -125 * 2.2, 'B', '#DC2626', 'DEST · NORTH STOPE FACE');
-      drawGoogleMapsPin(-70 * 2.2, 105 * 2.2, 'C', '#D97706', 'VENT SHAFT SOUTH');
-      drawGoogleMapsPin(275 * 2.2, 55 * 2.2, 'D', '#7C3AED', 'SUB-LEVEL 08 HEADING');
+      drawGoogleMapsPin(40 * 2.2, -115 * 2.2, 'B', '#DC2626', 'DEST · NORTH STOPE FACE');
+      drawGoogleMapsPin(-60 * 2.2, 105 * 2.2, 'C', '#D97706', 'VENT SHAFT SOUTH');
+      drawGoogleMapsPin(270 * 2.2, 55 * 2.2, 'D', '#7C3AED', 'SUB-LEVEL 08 HEADING');
+      drawGoogleMapsPin(240 * 2.2, 0, 'E', '#2563EB', 'MAIN HAULAGE EAST');
 
       // Hazard Anomaly Pin (if gas surge or fissure detected)
       if (hexapod.gasPpm > 400 || hexapod.fissureDetected) {
@@ -440,7 +527,7 @@ export const RealtimeMapHero: React.FC = () => {
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading, hexapod.gasPpm, hexapod.fissureDetected, zoom, followRobot, panOffset]);
+  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading, hexapod.gasPpm, hexapod.fissureDetected, activeScanBeams, mapPoints, showLidar, showPointCloud, zoom, followRobot, panOffset]);
 
   const exploredMeters = Math.round(mapPath.length * 1.4);
 
@@ -462,6 +549,34 @@ export const RealtimeMapHero: React.FC = () => {
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 text-xs">
+          {/* LiDAR Laser Rays Toggle */}
+          <button
+            onClick={() => setShowLidar(s => !s)}
+            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              showLidar
+                ? 'bg-[#06B6D4]/10 border-[#06B6D4]/40 text-[#0891B2]'
+                : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
+            }`}
+            title="Toggle 360-degree LiDAR laser beams and wall strike detection"
+          >
+            <span className={`w-2 h-2 rounded-full ${showLidar ? 'bg-[#06B6D4] animate-ping' : 'bg-gray-400'}`}></span>
+            <span>{showLidar ? 'LiDAR Rays: 360° [ON]' : 'LiDAR Rays [OFF]'}</span>
+          </button>
+
+          {/* SLAM Point Cloud Toggle */}
+          <button
+            onClick={() => setShowPointCloud(s => !s)}
+            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              showPointCloud
+                ? 'bg-[#10B981]/10 border-[#10B981]/40 text-[#059669]'
+                : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
+            }`}
+            title="Toggle revealed cave wall SLAM point cloud"
+          >
+            <span className={`w-2 h-2 rounded-full ${showPointCloud ? 'bg-[#10B981]' : 'bg-gray-400'}`}></span>
+            <span>{showPointCloud ? `SLAM Points (${mapPoints.length})` : 'SLAM Points [OFF]'}</span>
+          </button>
+
           <button
             onClick={handleCenterRobot}
             className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer ${
@@ -548,20 +663,24 @@ export const RealtimeMapHero: React.FC = () => {
         {/* GOOGLE MAPS STYLE BOTTOM-LEFT ROUTE LEGEND */}
         <div className="absolute bottom-4 left-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-3 px-4 flex flex-wrap items-center gap-4 text-xs font-mono shadow-md backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1.5 bg-[#2563EB] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Clear Route (&lt;300 PPM)</span>
+            <span className="w-3.5 h-1.5 bg-[#06B6D4] rounded"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">360° LiDAR Laser Rays</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1.5 bg-[#F59E0B] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Caution Route (300-500)</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#059669]"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">SLAM Scanned Walls</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3.5 h-1.5 bg-[#2563EB] rounded"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Active Navigation Route</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-1.5 bg-[#EF4444] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Blocked Incident</span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Hazard Incident</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-3.5 rounded-full bg-[#16A34A] text-white flex items-center justify-center text-[9px] font-bold">A</span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Start Origin</span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Start</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-3.5 h-3.5 rounded-full bg-[#DC2626] text-white flex items-center justify-center text-[9px] font-bold">B</span>
