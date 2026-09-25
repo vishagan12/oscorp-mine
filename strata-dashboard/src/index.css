@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --bg-color: #F8F6F0;
+  --surface: #FFFFFF;
+  --surface-elevated: #F3EFE6;
+  --border: #E6DFD5;
+  --border-hover: #D4C9BC;
+  
+  --text-main: #1F2421;
+  --text-muted: #6B685F;
+  
+  --terracotta: #C85A32;
+  --ochre: #B8860B;
+  --olive: #2E7D32;
+  --rust: #B71C1C;
+  --slate-blue: #0284C7;
+  
+  --font-sans: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle Warm Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F3EFE6;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D8D0C5;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #C4BAAC;
+}
+
+/* Card Elevation Utility */
+.earth-card {
+  background-color: #FFFFFF;
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px -2px rgba(45, 35, 25, 0.05), 0 2px 6px -1px rgba(45, 35, 25, 0.03);
+}
+
+.earth-panel {
+  background-color: #FFFFFF;
+  border: 1px solid var(--border);
+}
