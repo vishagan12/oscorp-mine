@@ -6,8 +6,7 @@ export const Sidebar: React.FC = () => {
   const { activeTab, setActiveTab, zones, evacActive, resetSystem, triggerHazard } = useDashboard();
 
   const navLinks: { id: DashboardTab; label: string; desc: string; icon: string }[] = [
-    { id: 'overview', label: 'Mission Control', desc: 'Live Video & SLAM Map', icon: '◈' },
-    { id: 'recon', label: 'Hexapod Recon', desc: 'Rover Steering & Telemetry', icon: '⬡' },
+    { id: 'overview', label: 'Mission Control', desc: 'Live Video, SLAM & Telemetry', icon: '◈' },
     { id: 'crew', label: 'Personnel Roster', desc: '10 Wearables & Helmets', icon: '☥' },
     { id: 'hazard_sim', label: 'Hazard Simulation', desc: 'Test Injections & Alerts', icon: '⚡' },
   ];

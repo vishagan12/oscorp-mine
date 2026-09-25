@@ -4,7 +4,6 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { BottomTelemetryStrip } from './components/BottomTelemetryStrip';
 import { OverviewPage } from './pages/OverviewPage';
-import { ReconPage } from './pages/ReconPage';
 import { CrewPage } from './pages/CrewPage';
 import { HazardSimPage } from './pages/HazardSimPage';
 
@@ -24,7 +23,6 @@ const DashboardContent: React.FC = () => {
         {/* Dynamic Main Viewport */}
         <main className="ml-64 flex-1 p-5 lg:p-6 bg-[#F8F6F0] min-h-[calc(100vh-126px)] overflow-x-hidden flex flex-col justify-between">
           {activeTab === 'overview' && <OverviewPage />}
-          {activeTab === 'recon' && <ReconPage />}
           {activeTab === 'crew' && <CrewPage />}
           {activeTab === 'hazard_sim' && <HazardSimPage />}
         </main>

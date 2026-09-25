@@ -630,20 +630,20 @@ export const RealtimeMapHero: React.FC = () => {
         />
 
         {/* GOOGLE MAPS SIGNATURE TURN-BY-TURN NAVIGATION BANNER (Top-Left HUD) */}
-        <div className="absolute top-4 left-4 bg-[#137333] border border-[#0d5224] rounded-2xl p-3 px-4 shadow-xl max-w-sm flex items-center gap-3.5 font-['Plus_Jakarta_Sans'] text-white">
-          <div className="w-11 h-11 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center text-2xl font-black shadow-inner shrink-0">
+        <div className="absolute top-3 left-3 bg-[#137333] border border-[#0d5224] rounded-xl p-2.5 px-3.5 shadow-lg max-w-[270px] flex items-center gap-2.5 font-['Plus_Jakarta_Sans'] text-white select-none">
+          <div className="w-9 h-9 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center text-xl font-black shadow-inner shrink-0">
             {currentNavPrompt.icon}
           </div>
-          <div>
-            <div className="text-[11px] font-black text-emerald-200 tracking-wider uppercase flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#4ADE80] animate-ping"></span>
-              <span>{currentNavPrompt.dist}</span>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-black text-emerald-200 tracking-wider uppercase flex items-center gap-1.5 truncate">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-ping shrink-0"></span>
+              <span className="truncate">{currentNavPrompt.dist}</span>
             </div>
-            <div className="text-xs font-bold text-white leading-tight mt-0.5">
+            <div className="text-xs font-bold text-white leading-tight mt-0.5 truncate">
               {currentNavPrompt.text}
             </div>
-            <div className="text-[10px] text-emerald-100/80 font-medium mt-0.5 flex items-center gap-1.5">
-              <span>Autonomous Navigation</span>
+            <div className="text-[10px] text-emerald-100/80 font-medium mt-0.5 flex items-center gap-1.5 truncate">
+              <span>Auto Nav</span>
               <span>·</span>
               <span className="font-mono">{hexapod.speedMps} m/s</span>
             </div>
@@ -651,59 +651,53 @@ export const RealtimeMapHero: React.FC = () => {
         </div>
 
         {/* Reference Scale Bar in Top-Right Corner */}
-        <div className="absolute top-4 right-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 flex flex-col items-center gap-1 shadow-sm backdrop-blur-xs">
+        <div className="absolute top-3 right-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-1.5 px-3 flex items-center gap-2 shadow-xs backdrop-blur-xs select-none">
           <div className="flex items-center gap-1">
-            <span className="w-1 h-2.5 bg-[#1F2421]"></span>
-            <span style={{ width: `${Math.round(22 * zoom)}px` }} className="h-0.5 bg-[#1F2421]"></span>
-            <span className="w-1 h-2.5 bg-[#1F2421]"></span>
+            <span className="w-0.5 h-2.5 bg-[#1F2421]"></span>
+            <span style={{ width: `${Math.round(20 * zoom)}px` }} className="h-0.5 bg-[#1F2421]"></span>
+            <span className="w-0.5 h-2.5 bg-[#1F2421]"></span>
           </div>
           <span className="text-[10px] font-mono text-[#6B685F] font-semibold">10m SCALE</span>
         </div>
 
         {/* GOOGLE MAPS STYLE BOTTOM-LEFT ROUTE LEGEND */}
-        <div className="absolute bottom-4 left-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-3 px-4 flex flex-wrap items-center gap-4 text-xs font-mono shadow-md backdrop-blur-sm">
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1.5 bg-[#06B6D4] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">360° LiDAR Laser Rays</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#059669]"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">SLAM Scanned Walls</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1.5 bg-[#2563EB] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Active Navigation Route</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-1.5 bg-[#EF4444] rounded"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Hazard Incident</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-3.5 rounded-full bg-[#16A34A] text-white flex items-center justify-center text-[9px] font-bold">A</span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Start</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="w-3.5 h-3.5 rounded-full bg-[#DC2626] text-white flex items-center justify-center text-[9px] font-bold">B</span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Destination</span>
+        <div className="absolute bottom-3 left-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 shadow-md backdrop-blur-sm text-[10px] font-mono select-none max-w-[270px]">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-2.5 h-1 bg-[#06B6D4] rounded-xs shrink-0"></span>
+              <span className="text-[#1F2421] font-semibold truncate">360° LiDAR</span>
+            </div>
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-2 h-2 rounded-full bg-[#059669] shrink-0"></span>
+              <span className="text-[#1F2421] font-semibold truncate">SLAM Walls</span>
+            </div>
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-2.5 h-1 bg-[#2563EB] rounded-xs shrink-0"></span>
+              <span className="text-[#1F2421] font-semibold truncate">Route Line</span>
+            </div>
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="w-2 h-2 rounded-full bg-[#16A34A] text-white flex items-center justify-center text-[7px] font-bold shrink-0">A</span>
+              <span className="text-[#1F2421] font-semibold truncate">Start / Exits</span>
+            </div>
           </div>
         </div>
 
         {/* GOOGLE MAPS STYLE TRIP BOTTOM CARD */}
-        <div className="absolute bottom-4 right-4 bg-white/95 border border-[#E6DFD5] rounded-2xl p-3 px-4 shadow-lg flex items-center gap-4 backdrop-blur-md">
+        <div className="absolute bottom-3 right-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3.5 shadow-md flex items-center gap-3 backdrop-blur-md select-none">
           <div className="flex flex-col">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-base font-black text-[#137333]">{Math.max(1, Math.round((mapPath.length * 0.4) / 10))} min</span>
-              <span className="text-xs text-[#6B685F] font-semibold">({exploredMeters}m traversed)</span>
+            <div className="flex items-baseline gap-1">
+              <span className="text-sm font-black text-[#137333]">{Math.max(1, Math.round((mapPath.length * 0.4) / 10))} min</span>
+              <span className="text-[10px] text-[#6B685F] font-semibold">({exploredMeters}m)</span>
             </div>
-            <div className="text-[11px] text-[#6B685F] flex items-center gap-1.5 font-medium">
+            <div className="text-[10px] text-[#6B685F] flex items-center gap-1 font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]"></span>
-              <span>Optimal Subterranean Route</span>
+              <span>Optimal Route</span>
             </div>
           </div>
-          <div className="h-7 w-px bg-[#E6DFD5]"></div>
+          <div className="h-6 w-px bg-[#E6DFD5]"></div>
           <button
             onClick={handleCenterRobot}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2563EB] text-white text-xs font-bold shadow-xs hover:bg-[#1D4ED8] transition-all cursor-pointer"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#2563EB] text-white text-[11px] font-bold shadow-xs hover:bg-[#1D4ED8] transition-all cursor-pointer"
           >
             <span>🧭</span>
             <span>Recenter</span>

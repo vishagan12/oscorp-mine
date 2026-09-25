@@ -4,16 +4,16 @@ import { RealtimeMapHero } from '../components/RealtimeMapHero';
 
 export const OverviewPage: React.FC = () => {
   return (
-    <div className="h-[calc(100vh-146px)] min-h-[580px] w-full flex flex-col">
+    <div className="w-full flex-1 flex flex-col pb-2">
       {/* Primary Dashboard Grid: Video Feed & Real-time Map as ONLY Major Components */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 flex-1 h-full">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 flex-1 items-stretch">
         {/* Major Component 1: Video Feed */}
-        <div className="h-full flex flex-col min-h-0">
+        <div className="flex flex-col min-h-0">
           <LiveCameraHero />
         </div>
 
         {/* Major Component 2: Created Map in Real-Time */}
-        <div className="h-full flex flex-col min-h-0">
+        <div className="flex flex-col min-h-0">
           <RealtimeMapHero />
         </div>
       </div>

@@ -20,7 +20,6 @@ export const Header: React.FC = () => {
 
   const navItems: { id: DashboardTab; label: string }[] = [
     { id: 'overview', label: 'Mission Control' },
-    { id: 'recon', label: 'Hexapod Recon' },
     { id: 'crew', label: 'Personnel Roster' },
     { id: 'hazard_sim', label: 'Hazard Simulation' },
   ];

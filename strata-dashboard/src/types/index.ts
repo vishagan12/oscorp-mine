@@ -1,4 +1,4 @@
-export type DashboardTab = 'overview' | 'recon' | 'crew' | 'hazard_sim';
+export type DashboardTab = 'overview' | 'crew' | 'hazard_sim';
 
 export type AlertSeverity = 'nominal' | 'warning' | 'critical';
 
