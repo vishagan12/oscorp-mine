@@ -2,7 +2,7 @@ import React from 'react';
 import { useDashboard } from '../context/DashboardContext';
 
 export const BottomTelemetryStrip: React.FC = () => {
-  const { workers, zones, safetyScore, evacActive, triggerHazard, resetSystem } = useDashboard();
+  const { workers, safetyScore, evacActive, triggerHazard, resetSystem } = useDashboard();
 
   const nominalCount = workers.filter(w => w.status === 'nominal').length;
   const helmetOffCount = workers.filter(w => !w.helmetOn).length;

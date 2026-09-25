@@ -243,7 +243,7 @@ export const HazardSimPage: React.FC = () => {
                   </div>
                 </div>
                 <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-[#C85A32]/10 text-[#C85A32] border border-[#C85A32]/20">
-                  {hexapod.status === 'nominal' ? 'Actively Scouting' : 'Alert Triggered'}
+                  {hexapod.status !== 'evacuating' ? 'Actively Scouting' : 'Alert Triggered'}
                 </span>
               </div>
 
@@ -371,7 +371,7 @@ export const HazardSimPage: React.FC = () => {
                     <div className="flex-1">
                       <div className="flex justify-between items-center text-[11px] text-[#6B685F] mb-1">
                         <span className="font-semibold uppercase tracking-wider text-[10px] text-[#1F2421]">
-                          {alert.source === 'gas' ? 'Atmospheric Sensor' : alert.source === 'vitals' ? 'Crew Biometrics' : alert.source === 'rover' ? 'Hexapod Telemetry' : 'Mission Control'}
+                          {alert.source === 'gas' ? 'Atmospheric Sensor' : alert.source === 'vitals' ? 'Crew Biometrics' : alert.source === 'hexapod' ? 'Hexapod Telemetry' : 'Mission Control'}
                         </span>
                         <span>{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
                       </div>

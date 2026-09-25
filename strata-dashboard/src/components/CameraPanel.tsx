@@ -3,7 +3,7 @@ import { Battery, Signal, Flame } from 'lucide-react';
 
 export default function CameraPanel() {
   const [gasPpm, setGasPpm] = useState(240);
-  const [battery, setBattery] = useState(87);
+  const [battery] = useState(87);
 
   // Simulate changing telemetry
   useEffect(() => {

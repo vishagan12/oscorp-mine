@@ -16,12 +16,12 @@ export const RealtimeMapHero: React.FC = () => {
   // Smooth camera position lerping (no jitter)
   const cameraPosRef = useRef<{ x: number; y: number }>({ x: hexapod.x * 2.2, y: hexapod.y * 2.2 });
 
-  // Memoized corridor floor plan model (only recomputes when gas thresholds or hazards change)
+  // Memoized corridor floor plan model
   const corridorModel = useMemo(() => {
     return buildCorridorPath(mapPoints, mapPath, hexapod, evacActive);
   }, [hexapod.gasPpm > 300, hexapod.gasPpm > 500, hexapod.fissureDetected, evacActive]);
 
-  // Cached Path2D for robot traveled path (only updates when new waypoints are added)
+  // Cached Path2D for robot traveled path
   const traveledPath2D = useMemo(() => {
     const p = new Path2D();
     if (mapPath.length > 0) {
@@ -43,7 +43,7 @@ export const RealtimeMapHero: React.FC = () => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          const dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap at 2x for optimal GPU perf
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
           canvas.width = Math.floor(width * dpr);
           canvas.height = Math.floor(height * dpr);
         }
@@ -54,7 +54,7 @@ export const RealtimeMapHero: React.FC = () => {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Smooth Mouse Wheel Zoom (centered zoom)
+  // Smooth Mouse Wheel Zoom
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -91,7 +91,7 @@ export const RealtimeMapHero: React.FC = () => {
     setPanOffset({ x: 0, y: 0 });
   }, []);
 
-  // Precomputed blueprint background grid Path2D (reused across all frames)
+  // Precomputed blueprint background grid Path2D
   const gridPath2D = useMemo(() => {
     const p = new Path2D();
     const size = 1200;
@@ -105,11 +105,28 @@ export const RealtimeMapHero: React.FC = () => {
     return p;
   }, []);
 
+  // Compute current navigation turn prompt based on hexapod position
+  const currentNavPrompt = useMemo(() => {
+    const x = hexapod.x;
+    const y = hexapod.y;
+    if (x < -100) {
+      return { icon: '↑', text: 'Proceed straight along Main Haulage Decline', dist: '55m to South Junction' };
+    } else if (x >= -100 && x < -20 && y > 30) {
+      return { icon: '↰', text: 'Exploring South Ventilation Decline', dist: '38m to Return Airway' };
+    } else if (x >= -20 && x < 80 && y < -20) {
+      return { icon: '↱', text: 'Surveying North Crosscut 01 (Stope Face)', dist: '25m to Active Face' };
+    } else if (x >= 80 && y > 20) {
+      return { icon: '↱', text: 'Mapping Sub-Level 08 Access Drift', dist: '40m to Heading' };
+    } else {
+      return { icon: '↑', text: 'Navigating Central Haulage Intersect', dist: 'Autonomous Corridor Selection' };
+    }
+  }, [hexapod.x, hexapod.y]);
+
   // 60FPS Hardware-Accelerated Canvas Rendering Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false }); // Disable canvas alpha for max blit speed
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
     let animId: number;
@@ -121,14 +138,13 @@ export const RealtimeMapHero: React.FC = () => {
       const centerX = w / 2;
       const centerY = h / 2;
 
-      // Reset transform and apply DPR scaling
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      // Fast solid background clear
+      // Fast solid background clear (warm parchment)
       ctx.fillStyle = '#FAF7F0';
       ctx.fillRect(0, 0, w, h);
 
-      // Camera position interpolation (smooth lerp tracking)
+      // Camera position interpolation
       const targetX = hexapod.x * 2.2;
       const targetY = hexapod.y * 2.2;
       if (followRobot) {
@@ -146,76 +162,60 @@ export const RealtimeMapHero: React.FC = () => {
         ctx.scale(zoom, zoom);
       }
 
-      // 1. Draw Blueprint Coordinate Grid (single GPU stroke call via pre-cached Path2D)
+      // 1. Blueprint Coordinate Grid
       ctx.strokeStyle = 'rgba(180, 165, 145, 0.18)';
       ctx.lineWidth = 1;
       ctx.stroke(gridPath2D);
 
-      // 2. Render Metro-Style Tunnel Corridors (Fast Path2D rendering)
+      // 2. Render Metro-Style Tunnel Corridors
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
-      // Pass 1: Outer structural wall lines
+      // Pass 1: Google Maps Road Borders (crisp light-slate boundary)
       corridorModel.segments.forEach((seg) => {
         if (!seg.cachedPath2D) return;
         const corridorPixelWidth = seg.widthMeters * 2.2 * 4.5;
         ctx.lineWidth = corridorPixelWidth + 4;
-        ctx.strokeStyle = seg.status === 'blocked' ? '#B71C1C' : '#D4C5B0';
+        ctx.strokeStyle = seg.status === 'blocked' ? '#EF4444' : '#CBD5E1';
         ctx.stroke(seg.cachedPath2D);
       });
 
-      // Pass 2: Solid interior corridor floor
+      // Pass 2: Pure White Clean Road Surface
       corridorModel.segments.forEach((seg) => {
         if (!seg.cachedPath2D) return;
         const corridorPixelWidth = seg.widthMeters * 2.2 * 4.5;
         ctx.lineWidth = corridorPixelWidth;
-        ctx.strokeStyle = '#EAE3D5';
+        ctx.strokeStyle = '#FFFFFF';
         ctx.stroke(seg.cachedPath2D);
       });
 
-      // Pass 3: Safety Regulation Overlays
+      // Pass 2b: Subtle Dashed Road Centerline
+      ctx.save();
+      ctx.setLineDash([8, 10]);
+      ctx.strokeStyle = 'rgba(203, 213, 225, 0.75)';
+      ctx.lineWidth = 1.5;
+      corridorModel.segments.forEach((seg) => {
+        if (!seg.cachedPath2D) return;
+        ctx.stroke(seg.cachedPath2D);
+      });
+      ctx.restore();
+
+      // Pass 3: Safety Regulation Overlays (if caution or blocked)
       corridorModel.segments.forEach((seg) => {
         if (!seg.cachedPath2D) return;
         const corridorPixelWidth = seg.widthMeters * 2.2 * 4.5;
-        let tint = 'rgba(46, 125, 50, 0.22)';
         if (seg.status === 'blocked' || seg.status === 'critical') {
-          tint = 'rgba(183, 28, 28, 0.35)';
+          ctx.lineWidth = corridorPixelWidth;
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.22)';
+          ctx.stroke(seg.cachedPath2D);
         } else if (seg.status === 'warning') {
-          tint = 'rgba(184, 134, 11, 0.26)';
-        }
-        ctx.lineWidth = corridorPixelWidth;
-        ctx.strokeStyle = tint;
-        ctx.stroke(seg.cachedPath2D);
-      });
-
-      // 3. Blocked / Hazard Badges
-      corridorModel.segments.forEach((seg) => {
-        if (seg.status === 'blocked') {
-          const mid = seg.points[Math.floor(seg.points.length / 2)];
-          const mx = mid.x * 2.2;
-          const my = mid.y * 2.2;
-
-          ctx.fillStyle = '#B71C1C';
-          ctx.beginPath();
-          ctx.arc(mx, my, 11, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = 2.2;
-          ctx.beginPath();
-          ctx.moveTo(mx - 4, my - 4); ctx.lineTo(mx + 4, my + 4);
-          ctx.moveTo(mx + 4, my - 4); ctx.lineTo(mx - 4, my + 4);
-          ctx.stroke();
-
-          ctx.fillStyle = '#B71C1C';
-          ctx.font = '700 9.5px "JetBrains Mono", monospace';
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('✕ BLOCKED HAZARD', mx + 16, my);
+          ctx.lineWidth = corridorPixelWidth;
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.18)';
+          ctx.stroke(seg.cachedPath2D);
         }
       });
 
-      // 4. Dimension Callouts (Blueprint dimension pills with pre-measured widths)
+      // 3. Dimension Callouts
       ctx.font = '500 9px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -246,79 +246,190 @@ export const RealtimeMapHero: React.FC = () => {
         ctx.fillText(text, cx, cy);
       });
 
-      // 5. Exit Portals
-      corridorModel.exits.forEach((exit) => {
-        const ex = exit.x * 2.2;
-        const ey = exit.y * 2.2;
-        const isBlocked = exit.status === 'blocked';
-        const color = isBlocked ? '#B71C1C' : '#2E7D32';
+      // 4. GOOGLE MAPS STYLE NAVIGATION ROUTE (Double-Pass Route with Traffic Colors & Chevrons)
+      if (mapPath.length > 1) {
+        // Underlay Casing (Google Maps dark route outline)
+        ctx.lineWidth = 9;
+        ctx.strokeStyle = 'rgba(15, 23, 42, 0.85)';
+        ctx.stroke(traveledPath2D);
 
-        ctx.fillStyle = isBlocked ? 'rgba(254, 242, 242, 0.96)' : 'rgba(240, 253, 244, 0.96)';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.4;
+        // Vibrant Traffic Route Line (Google Maps blue/green traffic styling)
+        ctx.lineWidth = 5.5;
+        let routeColor = '#2563EB'; // Google Maps Navigation Blue
+        if (hexapod.gasPpm > 450) {
+          routeColor = '#EF4444';   // Traffic Heavy / Hazard Breach
+        } else if (hexapod.gasPpm > 300) {
+          routeColor = '#F59E0B';   // Moderate / Caution
+        }
+
+        ctx.shadowColor = 'rgba(37, 99, 235, 0.35)';
+        ctx.shadowBlur = 6;
+        ctx.strokeStyle = routeColor;
+        ctx.stroke(traveledPath2D);
+        ctx.shadowBlur = 0;
+
+        // Directional Navigation Chevrons (Google Maps turn-by-turn arrows along path)
+        if (mapPath.length > 5) {
+          ctx.save();
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 1.6;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          for (let i = 10; i < mapPath.length; i += 18) {
+            const p1 = mapPath[i - 1];
+            const p2 = mapPath[i];
+            const angle = Math.atan2((p2.y - p1.y) * 2.2, (p2.x - p1.x) * 2.2);
+            const mx = p2.x * 2.2;
+            const my = p2.y * 2.2;
+
+            ctx.save();
+            ctx.translate(mx, my);
+            ctx.rotate(angle);
+            ctx.beginPath();
+            ctx.moveTo(-3, -3.5);
+            ctx.lineTo(2.5, 0);
+            ctx.lineTo(-3, 3.5);
+            ctx.stroke();
+            ctx.restore();
+          }
+          ctx.restore();
+        }
+      }
+
+      // 5. GOOGLE MAPS AUTHENTIC TEARDROP PINS
+      const drawGoogleMapsPin = (x: number, y: number, letter: string, color: string, label: string) => {
+        ctx.save();
+        // Drop shadow on ground
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
         ctx.beginPath();
-        ctx.roundRect(ex - 8, ey - 22, 108, 20, 5);
+        ctx.ellipse(x, y + 2, 7, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Teardrop pin body pointing straight down to (x, y)
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y - 19, 10.5, Math.PI * 0.8, Math.PI * 2.2);
+        ctx.lineTo(x, y);
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = color;
+        // Inner circle for letter
+        ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.moveTo(ex - 1, ey - 12);
-        ctx.lineTo(ex + 4, ey - 17);
-        ctx.lineTo(ex + 9, ey - 12);
-        ctx.closePath();
+        ctx.arc(x, y - 19, 6, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.font = '700 9.5px "JetBrains Mono", monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(isBlocked ? '✕ EXIT BLOCKED' : exit.label, ex + 14, ey - 12);
-      });
+        // Letter inside pin
+        ctx.fillStyle = color;
+        ctx.font = '800 9px "Plus Jakarta Sans", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(letter, x, y - 18.5);
 
-      // 6. Glowing Traveled Path (Single Path2D stroke)
-      if (mapPath.length > 1) {
-        ctx.shadowColor = '#FF441A';
-        ctx.shadowBlur = 8;
-        ctx.strokeStyle = '#FF441A';
-        ctx.lineWidth = 3.5;
-        ctx.stroke(traveledPath2D);
+        // Label pill floating above pin
+        ctx.font = '700 8.5px "JetBrains Mono", monospace';
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+        ctx.strokeStyle = '#CBD5E1';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x - tw / 2 - 5, y - 38, tw + 10, 15, 3);
+        ctx.fill();
+        ctx.stroke();
 
-        // Reset shadow for next primitives
-        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#0F172A';
+        ctx.fillText(label, x, y - 30);
+        ctx.restore();
+      };
+
+      // Start Origin Pin [A]
+      drawGoogleMapsPin(-180 * 2.2, -5 * 2.2, 'A', '#16A34A', 'START · PORTAL 01');
+
+      // Key Terminus & Destination Pins
+      drawGoogleMapsPin(40 * 2.2, -125 * 2.2, 'B', '#DC2626', 'DEST · NORTH STOPE FACE');
+      drawGoogleMapsPin(-70 * 2.2, 105 * 2.2, 'C', '#D97706', 'VENT SHAFT SOUTH');
+      drawGoogleMapsPin(275 * 2.2, 55 * 2.2, 'D', '#7C3AED', 'SUB-LEVEL 08 HEADING');
+
+      // Hazard Anomaly Pin (if gas surge or fissure detected)
+      if (hexapod.gasPpm > 400 || hexapod.fissureDetected) {
+        const hx = 40 * 2.2;
+        const hy = -60 * 2.2;
+        ctx.save();
+        ctx.fillStyle = '#DC2626';
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '800 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', hx, hy);
+
+        ctx.fillStyle = '#DC2626';
+        ctx.font = '700 9px "JetBrains Mono", monospace';
+        ctx.fillText('⚠ GAS BREACH INCIDENT', hx, hy + 16);
+        ctx.restore();
       }
 
-      // 7. Pulsing Coral Rover Heading Marker (#FF441A)
+      // 6. GOOGLE MAPS NAVIGATION LOCATION PUCK (White Ring + Blue Center + Heading Flashlight Cone)
       const rx = hexapod.x * 2.2;
       const ry = hexapod.y * 2.2;
       const rad = (hexapod.heading * Math.PI) / 180;
-      const pulseTime = Date.now() / 240;
-      const pulse = 14 + Math.sin(pulseTime) * 3.5;
 
       ctx.save();
       ctx.translate(rx, ry);
 
-      // Animated soft halo
+      // Flashlight Heading Cone (Google Maps Directional Beam)
+      const beamGradient = ctx.createRadialGradient(0, 0, 4, 0, 0, 58);
+      beamGradient.addColorStop(0, 'rgba(37, 99, 235, 0.40)');
+      beamGradient.addColorStop(1, 'rgba(37, 99, 235, 0.0)');
+      ctx.fillStyle = beamGradient;
       ctx.beginPath();
-      ctx.arc(0, 0, pulse, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 68, 26, 0.20)';
-      ctx.fill();
-
-      // Heading directional triangle
-      ctx.rotate(rad);
-      ctx.shadowColor = '#FF441A';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#FF441A';
-      ctx.beginPath();
-      ctx.moveTo(14, 0);
-      ctx.lineTo(-9, -8);
-      ctx.lineTo(-4, 0);
-      ctx.lineTo(-9, 8);
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, 58, rad - (32 * Math.PI) / 180, rad + (32 * Math.PI) / 180);
       ctx.closePath();
       ctx.fill();
 
+      // Outer GPS Accuracy Pulse Ring
+      const pulseTime = Date.now() / 250;
+      const pulse = 14 + Math.sin(pulseTime) * 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, pulse, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(37, 99, 235, 0.16)';
+      ctx.fill();
+
+      // Location Puck Body: Crisp White Outer Ring
+      ctx.beginPath();
+      ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+      ctx.shadowBlur = 6;
+      ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
+
+      // Inner Blue Navigation Dot
+      ctx.beginPath();
+      ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#2563EB';
+      ctx.fill();
+
+      // Directional Heading Indicator Tip
+      ctx.rotate(rad);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.moveTo(7, 0);
+      ctx.lineTo(2, -2.5);
+      ctx.lineTo(2, 2.5);
+      ctx.closePath();
+      ctx.fill();
 
       ctx.restore();
 
@@ -329,9 +440,9 @@ export const RealtimeMapHero: React.FC = () => {
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading, zoom, followRobot, panOffset]);
+  }, [corridorModel, traveledPath2D, gridPath2D, hexapod.x, hexapod.y, hexapod.heading, hexapod.gasPpm, hexapod.fissureDetected, zoom, followRobot, panOffset]);
 
-  const exploredMeters = Math.round(mapPath.length * 1.2);
+  const exploredMeters = Math.round(mapPath.length * 1.4);
 
   return (
     <div className="bg-white rounded-2xl border border-[#E6DFD5] flex flex-col overflow-hidden shadow-sm h-full font-['Plus_Jakarta_Sans']">
@@ -339,13 +450,13 @@ export const RealtimeMapHero: React.FC = () => {
       <div className="p-3.5 px-6 border-b border-[#E6DFD5] flex flex-wrap items-center justify-between gap-3 bg-[#FAF8F3]">
         <div>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32] animate-pulse"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#2563EB] animate-pulse"></span>
             <span className="font-bold text-sm text-[#1F2421] tracking-tight">
-              Hexapod LiDAR Floor Plan &amp; Evacuation Corridor Map
+              Hexapod Route Cartography // Google Maps Navigation View
             </span>
           </div>
           <span className="block text-xs text-[#6B685F] mt-0.5 font-medium">
-            Zoomed-Out Subterranean Drift Geometry // Hardware Accelerated Canvas
+            Autonomous Multi-Branch Route Exploration · Dynamic Turn-by-Turn Telemetry
           </span>
         </div>
 
@@ -355,11 +466,11 @@ export const RealtimeMapHero: React.FC = () => {
             onClick={handleCenterRobot}
             className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer ${
               followRobot
-                ? 'bg-[#2E7D32]/10 border-[#2E7D32]/40 text-[#2E7D32]'
+                ? 'bg-[#2563EB]/10 border-[#2563EB]/40 text-[#2563EB]'
                 : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
             }`}
           >
-            {followRobot ? '● Tracking Rover' : 'Center Rover'}
+            {followRobot ? '● Recenter Navigation' : 'Center Navigation'}
           </button>
 
           <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-[#E6DFD5]">
@@ -384,7 +495,7 @@ export const RealtimeMapHero: React.FC = () => {
             onClick={clearMap}
             className="px-3 py-1.5 rounded-lg bg-white border border-[#E6DFD5] text-[#6B685F] hover:text-[#1F2421] hover:bg-[#F3EFE6] transition-all cursor-pointer font-medium"
           >
-            Reset Map
+            Reset Route
           </button>
         </div>
       </div>
@@ -403,6 +514,27 @@ export const RealtimeMapHero: React.FC = () => {
           className="w-full h-full block"
         />
 
+        {/* GOOGLE MAPS SIGNATURE TURN-BY-TURN NAVIGATION BANNER (Top-Left HUD) */}
+        <div className="absolute top-4 left-4 bg-[#137333] border border-[#0d5224] rounded-2xl p-3 px-4 shadow-xl max-w-sm flex items-center gap-3.5 font-['Plus_Jakarta_Sans'] text-white">
+          <div className="w-11 h-11 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center text-2xl font-black shadow-inner shrink-0">
+            {currentNavPrompt.icon}
+          </div>
+          <div>
+            <div className="text-[11px] font-black text-emerald-200 tracking-wider uppercase flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#4ADE80] animate-ping"></span>
+              <span>{currentNavPrompt.dist}</span>
+            </div>
+            <div className="text-xs font-bold text-white leading-tight mt-0.5">
+              {currentNavPrompt.text}
+            </div>
+            <div className="text-[10px] text-emerald-100/80 font-medium mt-0.5 flex items-center gap-1.5">
+              <span>Autonomous Navigation</span>
+              <span>·</span>
+              <span className="font-mono">{hexapod.speedMps} m/s</span>
+            </div>
+          </div>
+        </div>
+
         {/* Reference Scale Bar in Top-Right Corner */}
         <div className="absolute top-4 right-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 flex flex-col items-center gap-1 shadow-sm backdrop-blur-xs">
           <div className="flex items-center gap-1">
@@ -413,58 +545,63 @@ export const RealtimeMapHero: React.FC = () => {
           <span className="text-[10px] font-mono text-[#6B685F] font-semibold">10m SCALE</span>
         </div>
 
-        {/* Compass Rose */}
-        <div className="absolute top-4 left-4 bg-white/90 border border-[#E6DFD5] rounded-xl p-2 px-3 flex items-center gap-2 text-xs font-semibold text-[#1F2421] shadow-sm backdrop-blur-xs">
-          <span className="text-[#C85A32] font-bold">N ↑</span>
-          <span className="text-[#6B685F] text-[11px] font-mono">SECTOR 09</span>
-        </div>
-
-        {/* Fixed Legend Box in Bottom-Left Corner */}
+        {/* GOOGLE MAPS STYLE BOTTOM-LEFT ROUTE LEGEND */}
         <div className="absolute bottom-4 left-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-3 px-4 flex flex-wrap items-center gap-4 text-xs font-mono shadow-md backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded bg-[#2E7D32]/30 border border-[#2E7D32]"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Safe Path (&lt;300 PPM)</span>
+            <span className="w-3.5 h-1.5 bg-[#2563EB] rounded"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Clear Route (&lt;300 PPM)</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded bg-[#B8860B]/30 border border-[#B8860B]"></span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Caution (300-500)</span>
+            <span className="w-3.5 h-1.5 bg-[#F59E0B] rounded"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Caution Route (300-500)</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded bg-[#B71C1C]/40 border border-[#B71C1C] flex items-center justify-center text-[9px] font-bold text-white">✕</span>
-            <span className="text-[#1F2421] font-semibold text-[11px]">Critical / Blocked</span>
+            <span className="w-3.5 h-1.5 bg-[#EF4444] rounded"></span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Blocked Incident</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-4 h-1 bg-[#FF441A] rounded"></span>
-            <span className="text-[#FF441A] font-bold text-[11px]">Traveled Path</span>
+            <span className="w-3.5 h-3.5 rounded-full bg-[#16A34A] text-white flex items-center justify-center text-[9px] font-bold">A</span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Start Origin</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded bg-[#FAF7F0] border border-[#D4C5B0]"></span>
-            <span className="text-[#6B685F] text-[11px]">Unexplored</span>
+            <span className="w-3.5 h-3.5 rounded-full bg-[#DC2626] text-white flex items-center justify-center text-[9px] font-bold">B</span>
+            <span className="text-[#1F2421] font-semibold text-[11px]">Destination</span>
           </div>
         </div>
 
-        {/* Live Exploration Readouts in Bottom-Right */}
-        <div className="absolute bottom-4 right-4 bg-white/95 border border-[#E6DFD5] rounded-xl p-2.5 px-3.5 shadow-sm text-xs flex flex-col gap-0.5 backdrop-blur-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[#6B685F]">Explored Length:</span>
-            <span className="font-bold text-[#1F2421]">{exploredMeters} Meters</span>
+        {/* GOOGLE MAPS STYLE TRIP BOTTOM CARD */}
+        <div className="absolute bottom-4 right-4 bg-white/95 border border-[#E6DFD5] rounded-2xl p-3 px-4 shadow-lg flex items-center gap-4 backdrop-blur-md">
+          <div className="flex flex-col">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-base font-black text-[#137333]">{Math.max(1, Math.round((mapPath.length * 0.4) / 10))} min</span>
+              <span className="text-xs text-[#6B685F] font-semibold">({exploredMeters}m traversed)</span>
+            </div>
+            <div className="text-[11px] text-[#6B685F] flex items-center gap-1.5 font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]"></span>
+              <span>Optimal Subterranean Route</span>
+            </div>
           </div>
-          <div className="text-[11px] text-[#6B685F]">
-            Position: {hexapod.x.toFixed(1)}m E, {hexapod.y.toFixed(1)}m N · {hexapod.heading}°
-          </div>
+          <div className="h-7 w-px bg-[#E6DFD5]"></div>
+          <button
+            onClick={handleCenterRobot}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2563EB] text-white text-xs font-bold shadow-xs hover:bg-[#1D4ED8] transition-all cursor-pointer"
+          >
+            <span>🧭</span>
+            <span>Recenter</span>
+          </button>
         </div>
       </div>
 
       {/* Bottom Exploration Summary Strip */}
       <div className="p-3.5 px-6 bg-[#FAF8F3] border-t border-[#E6DFD5] grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-xs">
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Corridor Network</span>
-          <span className="font-bold text-[#1F2421] text-sm mt-0.5 block">4 Drifts Active</span>
+          <span className="text-xs text-[#6B685F] block font-medium">Active Navigation</span>
+          <span className="font-bold text-[#2563EB] text-sm mt-0.5 block">Autonomous Waypoints</span>
         </div>
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Safe Evacuation Route</span>
+          <span className="text-xs text-[#6B685F] block font-medium">Safe Route to Exit</span>
           <span className="font-bold text-[#2E7D32] text-sm mt-0.5 block">
-            {evacActive ? 'Blocked by Hazard' : 'Clear → Portal 01'}
+            {evacActive ? 'Blocked by Hazard' : 'Clear Route → Portal 01'}
           </span>
         </div>
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
@@ -474,9 +611,9 @@ export const RealtimeMapHero: React.FC = () => {
           </span>
         </div>
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Rover Heading</span>
+          <span className="text-xs text-[#6B685F] block font-medium">Rover Velocity</span>
           <span className="font-bold text-[#C85A32] text-sm mt-0.5 block">
-            {hexapod.heading}° Azimuth
+            {hexapod.speedMps} m/s ({hexapod.heading}°)
           </span>
         </div>
       </div>

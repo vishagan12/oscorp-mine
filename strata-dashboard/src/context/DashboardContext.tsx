@@ -46,6 +46,30 @@ const initialZones: ZoneStatus[] = [
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
+// Subterranean Waypoint Navigation Graph for Multi-Direction Exploration
+interface MineNavNode {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  neighbors: string[];
+}
+
+const MINE_NAV_GRAPH: Record<string, MineNavNode> = {
+  portal: { id: 'portal', name: 'Portal Entry 01', x: -180, y: -5, neighbors: ['haulage_west'] },
+  haulage_west: { id: 'haulage_west', name: 'West Haulage Drift', x: -125, y: -7, neighbors: ['portal', 'junction_south'] },
+  junction_south: { id: 'junction_south', name: 'South Decline Junction', x: -70, y: -5, neighbors: ['haulage_west', 'mid_south', 'junction_mid'] },
+  mid_south: { id: 'mid_south', name: 'South Ventilation Incline', x: -70, y: 55, neighbors: ['junction_south', 'vent_south'] },
+  vent_south: { id: 'vent_south', name: 'Ventilation Shaft South', x: -70, y: 105, neighbors: ['mid_south'] },
+  junction_mid: { id: 'junction_mid', name: 'Central Haulage Drift', x: -15, y: -2, neighbors: ['junction_south', 'junction_north'] },
+  junction_north: { id: 'junction_north', name: 'North Crosscut Junction', x: 40, y: 15, neighbors: ['junction_mid', 'mid_north', 'junction_east'] },
+  mid_north: { id: 'mid_north', name: 'North Extraction Crosscut', x: 40, y: -60, neighbors: ['junction_north', 'stope_north'] },
+  stope_north: { id: 'stope_north', name: 'North Stope Face', x: 40, y: -125, neighbors: ['mid_north'] },
+  junction_east: { id: 'junction_east', name: 'Sub-Level 08 Split', x: 170, y: 25, neighbors: ['junction_north', 'sublevel_east', 'main_east'] },
+  sublevel_east: { id: 'sublevel_east', name: 'Sub-Level 08 Heading', x: 275, y: 55, neighbors: ['junction_east'] },
+  main_east: { id: 'main_east', name: 'Main Haulage East Face', x: 245, y: -10, neighbors: ['junction_east'] },
+};
+
 export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [workers, setWorkers] = useState<WorkerData[]>(initialWorkers);
@@ -56,8 +80,8 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [simulationRunning, setSimulationRunning] = useState<boolean>(true);
 
   const [hexapod, setHexapod] = useState<HexapodState>({
-    x: 0,
-    y: 0,
+    x: -180,
+    y: -5,
     heading: 0,
     battery: 92,
     signalDbm: -60,
@@ -67,13 +91,13 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     o2Percent: 20.8,
     ch4Percent: 0.12,
     fissureDetected: false,
-    speedMps: 0.45,
+    speedMps: 2.1,
     thermalMode: false,
     streamUrl: '',
   });
 
   const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
-  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: 0, y: 0 }]);
+  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: -180, y: -5 }]);
   const [activeScanBeams, setActiveScanBeams] = useState<{ x1: number; y1: number; x2: number; y2: number; hit: boolean }[]>([]);
 
   const [alerts, setAlerts] = useState<AlertItem[]>([
@@ -82,7 +106,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       timestamp: new Date().toISOString(),
       severity: 'info',
       source: 'hexapod',
-      message: 'Hexapod LiDAR SLAM active. 19-beam real-time scan building underground map.',
+      message: 'Hexapod LiDAR SLAM active. Autonomous multi-branch route exploration initiated.',
     },
     {
       id: 'alt-002',
@@ -93,7 +117,8 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   ]);
 
-  const stepCountRef = useRef(0);
+  const targetNodeIdRef = useRef<string>('haulage_west');
+  const lastNodeIdRef = useRef<string>('portal');
 
   const clearMap = useCallback(() => {
     setMapPoints([]);
@@ -104,43 +129,97 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     if (!simulationRunning) return;
 
+    // Geometric wall collision detector covering all 4 subterranean tunnel drifts
     const getTunnelDistance = (x: number, y: number, angleDeg: number): number => {
       const rad = (angleDeg * Math.PI) / 180;
       const cosA = Math.cos(rad);
       const sinA = Math.sin(rad);
 
-      for (let d = 5; d < 80; d += 1) {
+      for (let d = 4; d < 75; d += 1) {
         const testX = x + cosA * d;
         const testY = y + sinA * d;
 
-        // Tunnel corridor boundary calculation
-        const tunnelCenterY = Math.sin(testX * 0.02) * 45;
-        const distFromCenter = Math.abs(testY - tunnelCenterY);
+        // Check if test point is inside ANY tunnel corridor
+        let insideTunnel = false;
 
-        if (distFromCenter >= 30 + Math.sin(testX * 0.1) * 3) {
-          return d + (Math.random() - 0.5) * 1.5;
+        // 1. Main Haulage: x: -195 to 265, y: sin(x * 0.018)*35, half-width: 17
+        if (testX >= -195 && testX <= 265) {
+          const centerY = Math.sin(testX * 0.018) * 35;
+          if (Math.abs(testY - centerY) <= 17) {
+            insideTunnel = true;
+          }
         }
 
-        // Support pillar obstacle
-        if (Math.abs(testX % 90) < 6 && Math.abs(testY % 45) < 6) {
-          return d;
+        // 2. North Crosscut: x: 40, y: -135 to 20, half-width: 15
+        if (!insideTunnel && testY >= -135 && testY <= 20) {
+          if (Math.abs(testX - 40) <= 15) {
+            insideTunnel = true;
+          }
+        }
+
+        // 3. South Ventilation Decline: x: -70, y: -10 to 115, half-width: 16
+        if (!insideTunnel && testY >= -10 && testY <= 115) {
+          if (Math.abs(testX - (-70)) <= 16) {
+            insideTunnel = true;
+          }
+        }
+
+        // 4. East Stope / Sub-Level: x: 165 to 295, half-width: 15
+        if (!insideTunnel && testX >= 165 && testX <= 295) {
+          const centerY = 30 + Math.cos((testX - 170) * 0.025) * 20;
+          if (Math.abs(testY - centerY) <= 15) {
+            insideTunnel = true;
+          }
+        }
+
+        // If point stepped outside all corridors, that's where the LiDAR ray strikes the rock wall
+        if (!insideTunnel) {
+          return d + (Math.random() - 0.5) * 0.8;
         }
       }
-      return 60;
+      return 70;
     };
 
     const interval = setInterval(() => {
-      stepCountRef.current += 1;
-      const step = stepCountRef.current;
-
       setHexapod((prev) => {
-        const speed = 1.2;
-        const targetHeading = Math.sin(step * 0.04) * 45;
-        const newHeading = Math.round(prev.heading + (targetHeading - prev.heading) * 0.1);
-        const newX = prev.x + Math.cos((newHeading * Math.PI) / 180) * speed;
-        const newY = prev.y + Math.sin((newHeading * Math.PI) / 180) * speed;
+        // Autonomous Multi-Direction Route Navigation
+        const targetNode = MINE_NAV_GRAPH[targetNodeIdRef.current] || MINE_NAV_GRAPH['portal'];
+        const dx = targetNode.x - prev.x;
+        const dy = targetNode.y - prev.y;
+        const distToTarget = Math.hypot(dx, dy);
 
-        const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 4);
+        // When reaching a junction or dead-end, choose a new random connected corridor!
+        if (distToTarget < 7) {
+          const prevId = lastNodeIdRef.current;
+          lastNodeIdRef.current = targetNode.id;
+
+          // Pick from neighbors: prefer non-backtracking branches unless at a dead end
+          const neighbors = targetNode.neighbors;
+          let nextNodeId = neighbors[Math.floor(Math.random() * neighbors.length)];
+          if (neighbors.length > 1 && Math.random() < 0.85) {
+            const forwardNeighbors = neighbors.filter((id) => id !== prevId);
+            if (forwardNeighbors.length > 0) {
+              nextNodeId = forwardNeighbors[Math.floor(Math.random() * forwardNeighbors.length)];
+            }
+          }
+          targetNodeIdRef.current = nextNodeId;
+        }
+
+        // Smooth steering towards destination waypoint
+        const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
+        let diff = desiredHeading - prev.heading;
+        while (diff > 180) diff -= 360;
+        while (diff < -180) diff += 360;
+        const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), 8);
+        const newHeading = Math.round((prev.heading + turnStep + 360) % 360);
+
+        // Advance along heading vector smoothly at 0.75m/tick (~2.1 m/s rover speed)
+        const stepDist = 0.75;
+        const radHeading = (newHeading * Math.PI) / 180;
+        const newX = +(prev.x + Math.cos(radHeading) * stepDist).toFixed(2);
+        const newY = +(prev.y + Math.sin(radHeading) * stepDist).toFixed(2);
+
+        const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.5);
 
         const beams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] = [];
         const newPointsBatch: MapPoint[] = [];
@@ -176,9 +255,10 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           return combined.length > 1500 ? combined.slice(combined.length - 1500) : combined;
         });
 
+        // Store up to 1000 points so the entire multi-branch route persists like Google Maps
         setMapPath((old) => {
           const p = [...old, { x: newX, y: newY }];
-          return p.length > 250 ? p.slice(p.length - 250) : p;
+          return p.length > 1000 ? p.slice(p.length - 1000) : p;
         });
 
         return {
@@ -189,7 +269,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           gasPpm: currentGas,
           coPpm: Number((currentGas * 0.016).toFixed(1)),
           ch4Percent: Number((currentGas * 0.0006).toFixed(3)),
-          battery: Math.max(12, prev.battery - 0.002),
+          battery: Math.max(12, prev.battery - 0.001),
         };
       });
 
@@ -198,7 +278,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         bpm: Math.round(Math.min(150, Math.max(58, w.bpm + (Math.random() - 0.5) * 1.5))),
       })));
 
-    }, 350);
+    }, 120);
 
     return () => clearInterval(interval);
   }, [simulationRunning]);

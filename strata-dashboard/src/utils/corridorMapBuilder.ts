@@ -84,7 +84,7 @@ const DIMENSION_EAST = { x: 230, y: 55, widthText: '↔ 2.6m WIDTH', lengthText:
  * Returns memoized corridor floor plan model with pre-baked Path2D paths.
  */
 export function buildCorridorPath(
-  mapPoints: { x: number; y: number; gasPpm: number }[],
+  _mapPoints: { x: number; y: number; gasPpm: number }[],
   mapPath: { x: number; y: number }[],
   hexapod: { x: number; y: number; heading: number; gasPpm: number; fissureDetected?: boolean },
   evacActive: boolean
