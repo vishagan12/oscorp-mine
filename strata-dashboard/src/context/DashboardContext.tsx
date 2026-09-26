@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { DashboardTab, WorkerData, HexapodState, MapPoint, ZoneStatus, AlertItem } from '../types';
+import { DashboardTab, WorkerData, HexapodState, MapPoint, ZoneStatus, AlertItem, MinePatrolWaypoint, ActivePatrolInfo } from '../types';
 
 interface DashboardContextType {
   activeTab: DashboardTab;
@@ -9,6 +9,8 @@ interface DashboardContextType {
   mapPoints: MapPoint[];
   mapPath: { x: number; y: number }[];
   activeScanBeams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[];
+  activePatrol: ActivePatrolInfo;
+  patrolRoute: MinePatrolWaypoint[];
   zones: ZoneStatus[];
   alerts: AlertItem[];
   safetyScore: number;
@@ -46,31 +48,67 @@ const initialZones: ZoneStatus[] = [
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
-// Subterranean Waypoint Navigation Graph for Multi-Direction Exploration
-interface MineNavNode {
-  id: string;
-  name: string;
-  x: number;
-  y: number;
-  neighbors: string[];
-}
+// Comprehensive 41-Waypoint Autonomous SLAM Exploration Route
+// Covers 100% of the subterranean drift network:
+// West Haulage -> South Vent Incline & Terminus -> Central Curves -> North Stope Face -> East Haulage -> Sub-Level 08 Heading -> East Face -> Full Westbound Return
+export const PATROL_ROUTE: MinePatrolWaypoint[] = [
+  // 1. West Haulage: Portal 01 to South Junction
+  { id: 'p0', name: 'Portal Entry 01 Base', zone: 'Sector 09', x: -185, y: 0, turnType: 'straight', turnPrompt: 'Advance East along Main Haulage Decline', targetSpeed: 2.2 },
+  { id: 'p1', name: 'West Haulage - Sec A', zone: 'Sector 09', x: -140, y: 0, turnType: 'straight', turnPrompt: 'Proceed straight through West Haulage', targetSpeed: 2.4 },
+  { id: 'p2', name: 'West Haulage - Sec B', zone: 'Sector 09', x: -100, y: 0, turnType: 'right', turnPrompt: 'Approaching South Decline Junction', targetSpeed: 2.0 },
+  
+  // 2. Branch A: South Ventilation Incline
+  { id: 'j_south', name: 'South Decline Junction', zone: 'Sector 09', x: -60, y: 0, turnType: 'right', turnPrompt: 'Turn right into South Ventilation Incline', targetSpeed: 1.4 },
+  { id: 's1', name: 'South Incline - Upper', zone: 'Vent Shaft South', x: -60, y: 35, turnType: 'straight', turnPrompt: 'Descending South Ventilation Incline', targetSpeed: 2.0 },
+  { id: 's2', name: 'South Incline - Lower', zone: 'Vent Shaft South', x: -60, y: 70, turnType: 'straight', turnPrompt: 'Approaching South Shaft Terminus', targetSpeed: 1.6 },
+  { id: 's_term', name: 'Vent Shaft South Face', zone: 'Vent Shaft South', x: -60, y: 105, turnType: 'uturn', turnPrompt: 'Terminus reached: 360° LiDAR Inspection Scan', targetSpeed: 0.0, dwellTicks: 10, inspectionNote: 'Ventilation Shaft nominal. Airflow 4.2 m/s.' },
+  { id: 's_ret2', name: 'South Incline - Ascending', zone: 'Vent Shaft South', x: -60, y: 70, turnType: 'straight', turnPrompt: 'Ascending South Incline toward Haulage', targetSpeed: 2.0 },
+  { id: 's_ret1', name: 'South Incline - Approach', zone: 'Vent Shaft South', x: -60, y: 35, turnType: 'left', turnPrompt: 'Approaching Main Haulage Junction', targetSpeed: 1.6 },
+  { id: 'j_south_ret', name: 'South Decline Junction', zone: 'Sector 09', x: -60, y: 0, turnType: 'right', turnPrompt: 'Turn right onto Central Haulage Drift', targetSpeed: 1.4 },
 
-const MINE_NAV_GRAPH: Record<string, MineNavNode> = {
-  portal: { id: 'portal', name: 'Portal Entry 01', x: -180, y: 0, neighbors: ['haulage_west'] },
-  haulage_west: { id: 'haulage_west', name: 'West Haulage Drift', x: -120, y: 0, neighbors: ['portal', 'junction_south'] },
-  junction_south: { id: 'junction_south', name: 'South Decline Junction', x: -60, y: 0, neighbors: ['haulage_west', 'mid_south', 'haulage_mid'] },
-  mid_south: { id: 'mid_south', name: 'South Ventilation Incline', x: -60, y: 55, neighbors: ['junction_south', 'vent_south'] },
-  vent_south: { id: 'vent_south', name: 'Ventilation Shaft South', x: -60, y: 105, neighbors: ['mid_south'] },
-  haulage_mid: { id: 'haulage_mid', name: 'Central Haulage Drift', x: -10, y: 10, neighbors: ['junction_south', 'junction_north'] },
-  junction_north: { id: 'junction_north', name: 'North Crosscut Junction', x: 40, y: 20, neighbors: ['haulage_mid', 'mid_north', 'haulage_east'] },
-  mid_north: { id: 'mid_north', name: 'North Extraction Crosscut', x: 40, y: -45, neighbors: ['junction_north', 'stope_north'] },
-  stope_north: { id: 'stope_north', name: 'North Stope Active Face', x: 40, y: -115, neighbors: ['mid_north'] },
-  haulage_east: { id: 'haulage_east', name: 'East Haulage Drift', x: 100, y: 22, neighbors: ['junction_north', 'junction_east'] },
-  junction_east: { id: 'junction_east', name: 'Sub-Level 08 Split', x: 160, y: 20, neighbors: ['haulage_east', 'sublevel_mid', 'haulage_terminus'] },
-  sublevel_mid: { id: 'sublevel_mid', name: 'Sub-Level 08 Incline', x: 215, y: 42, neighbors: ['junction_east', 'sublevel_east'] },
-  sublevel_east: { id: 'sublevel_east', name: 'Sub-Level 08 Heading', x: 270, y: 55, neighbors: ['sublevel_mid'] },
-  haulage_terminus: { id: 'haulage_terminus', name: 'Main Haulage East Face', x: 240, y: 0, neighbors: ['junction_east'] },
-};
+  // 3. Central Haulage Drift to North Junction
+  { id: 'm1', name: 'Central Haulage - Curve 1', zone: 'Sector 09', x: -25, y: 7, turnType: 'straight', turnPrompt: 'Navigating Central Haulage Drift curve', targetSpeed: 2.2 },
+  { id: 'm2', name: 'Central Haulage - Curve 2', zone: 'Sector 09', x: 10, y: 15, turnType: 'left', turnPrompt: 'Approaching North Crosscut Junction', targetSpeed: 2.0 },
+
+  // 4. Branch B: North Extraction Crosscut
+  { id: 'j_north', name: 'North Crosscut Junction', zone: 'Sector 07', x: 40, y: 20, turnType: 'left', turnPrompt: 'Turn left into North Extraction Crosscut', targetSpeed: 1.4 },
+  { id: 'n1', name: 'North Crosscut - Entry', zone: 'North Stope Face', x: 40, y: -20, turnType: 'straight', turnPrompt: 'Advancing along North Extraction Crosscut', targetSpeed: 2.0 },
+  { id: 'n2', name: 'North Crosscut - Mid Stope', zone: 'North Stope Face', x: 40, y: -65, turnType: 'straight', turnPrompt: 'Approaching active extraction rock face', targetSpeed: 1.6 },
+  { id: 'n_term', name: 'North Stope Active Face', zone: 'North Stope Face', x: 40, y: -115, turnType: 'uturn', turnPrompt: 'Face reached: SLAM Wall Profiling & Crack Scan', targetSpeed: 0.0, dwellTicks: 12, inspectionNote: 'Fissure analysis active. Rock integrity verified.' },
+  { id: 'n_ret2', name: 'North Crosscut - Return', zone: 'North Stope Face', x: 40, y: -65, turnType: 'straight', turnPrompt: 'Exiting North Crosscut toward Haulage', targetSpeed: 2.0 },
+  { id: 'n_ret1', name: 'North Crosscut - Exit Drift', zone: 'North Stope Face', x: 40, y: -20, turnType: 'right', turnPrompt: 'Approaching Central Haulage Junction', targetSpeed: 1.6 },
+  { id: 'j_north_ret', name: 'North Crosscut Junction', zone: 'Sector 07', x: 40, y: 20, turnType: 'left', turnPrompt: 'Turn left onto East Haulage Drift', targetSpeed: 1.4 },
+
+  // 5. East Haulage Drift to Sub-Level 08 Split
+  { id: 'e1', name: 'East Haulage - Sec 1', zone: 'Sector 08', x: 80, y: 22, turnType: 'straight', turnPrompt: 'Cruising along East Haulage Drift', targetSpeed: 2.4 },
+  { id: 'e2', name: 'East Haulage - Sec 2', zone: 'Sector 08', x: 120, y: 22, turnType: 'right', turnPrompt: 'Approaching Sub-Level 08 Incline Split', targetSpeed: 2.0 },
+
+  // 6. Branch C: Sub-Level 08 Incline
+  { id: 'j_east', name: 'Sub-Level 08 Split', zone: 'Sub-Level 08', x: 160, y: 20, turnType: 'right', turnPrompt: 'Turn right down Sub-Level 08 Access Drift', targetSpeed: 1.4 },
+  { id: 'sl1', name: 'Sub-Level 08 Incline', zone: 'Sub-Level 08', x: 195, y: 36, turnType: 'straight', turnPrompt: 'Descending Sub-Level 08 decline ramp', targetSpeed: 2.0 },
+  { id: 'sl2', name: 'Sub-Level 08 Lower Drift', zone: 'Sub-Level 08', x: 230, y: 48, turnType: 'straight', turnPrompt: 'Approaching Sub-Level 08 excavation heading', targetSpeed: 1.6 },
+  { id: 'sl_term', name: 'Sub-Level 08 Heading', zone: 'Sub-Level 08', x: 270, y: 55, turnType: 'uturn', turnPrompt: 'Heading reached: Subterranean Gas & Thermal Scan', targetSpeed: 0.0, dwellTicks: 10, inspectionNote: 'Deep strata telemetry: Methane nominal.' },
+  { id: 'sl_ret2', name: 'Sub-Level 08 Ascent 2', zone: 'Sub-Level 08', x: 230, y: 48, turnType: 'straight', turnPrompt: 'Ascending Sub-Level 08 return ramp', targetSpeed: 2.0 },
+  { id: 'sl_ret1', name: 'Sub-Level 08 Ascent 1', zone: 'Sub-Level 08', x: 195, y: 36, turnType: 'left', turnPrompt: 'Approaching Main Haulage Split', targetSpeed: 1.6 },
+  { id: 'j_east_ret', name: 'Sub-Level 08 Split', zone: 'Sub-Level 08', x: 160, y: 20, turnType: 'straight', turnPrompt: 'Surveying Main Haulage East Terminus Face', targetSpeed: 1.4 },
+
+  // 7. Main Haulage East Face Survey
+  { id: 't1', name: 'East Extension Drift', zone: 'Sector 08', x: 200, y: 12, turnType: 'straight', turnPrompt: 'Advancing to Main Haulage East Face', targetSpeed: 2.0 },
+  { id: 'east_term', name: 'Main Haulage East Terminus', zone: 'Sector 08', x: 240, y: 0, turnType: 'uturn', turnPrompt: 'East Terminus reached: Perimeter 100% Surveyed', targetSpeed: 0.0, dwellTicks: 8, inspectionNote: 'Haulage perimeter 100% mapped. Beginning Westbound Patrol.' },
+  { id: 't1_ret', name: 'East Extension Return', zone: 'Sector 08', x: 200, y: 12, turnType: 'straight', turnPrompt: 'Westbound return along East Haulage Drift', targetSpeed: 2.2 },
+  { id: 'j_east_west', name: 'Sub-Level 08 Split', zone: 'Sector 08', x: 160, y: 20, turnType: 'straight', turnPrompt: 'Passing Sub-Level 08 Split westbound', targetSpeed: 2.2 },
+
+  // 8. Return Sweep along Main Haulage back to Portal 01
+  { id: 'e2_west', name: 'East Haulage Westbound 2', zone: 'Sector 08', x: 120, y: 22, turnType: 'straight', turnPrompt: 'Full speed transit along East Haulage', targetSpeed: 2.5 },
+  { id: 'e1_west', name: 'East Haulage Westbound 1', zone: 'Sector 08', x: 80, y: 22, turnType: 'straight', turnPrompt: 'Approaching North Crosscut Junction westbound', targetSpeed: 2.4 },
+  { id: 'j_north_west', name: 'North Junction Westbound', zone: 'Sector 07', x: 40, y: 20, turnType: 'straight', turnPrompt: 'Passing North Crosscut Junction', targetSpeed: 2.2 },
+  { id: 'm2_west', name: 'Central Curve Westbound 2', zone: 'Sector 09', x: 10, y: 15, turnType: 'straight', turnPrompt: 'Navigating Central Haulage curve westbound', targetSpeed: 2.2 },
+  { id: 'm1_west', name: 'Central Curve Westbound 1', zone: 'Sector 09', x: -25, y: 7, turnType: 'straight', turnPrompt: 'Approaching South Decline Junction westbound', targetSpeed: 2.2 },
+  { id: 'j_south_west', name: 'South Junction Westbound', zone: 'Sector 09', x: -60, y: 0, turnType: 'straight', turnPrompt: 'Entering West Haulage Main Incline', targetSpeed: 2.4 },
+  { id: 'p2_west', name: 'West Haulage Incline 2', zone: 'Sector 09', x: -100, y: 0, turnType: 'straight', turnPrompt: 'Approaching Portal Entry 01 approach', targetSpeed: 2.4 },
+  { id: 'p1_west', name: 'West Haulage Incline 1', zone: 'Sector 09', x: -140, y: 0, turnType: 'straight', turnPrompt: 'Decelerating on Portal 01 final approach', targetSpeed: 2.0 },
+  { id: 'p0_cycle', name: 'Portal Entry 01 Base', zone: 'Sector 09', x: -185, y: 0, turnType: 'straight', turnPrompt: 'Patrol cycle completed. Reinitializing autonomous routine.', targetSpeed: 1.8 }
+];
 
 // Tunnel segments for exact physical distance computation
 const TUNNEL_SEGMENTS: [number, number, number, number][] = [
@@ -130,7 +168,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [simulationRunning, setSimulationRunning] = useState<boolean>(true);
 
   const [hexapod, setHexapod] = useState<HexapodState>({
-    x: -180,
+    x: -185,
     y: 0,
     heading: 0,
     battery: 92,
@@ -141,14 +179,29 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     o2Percent: 20.8,
     ch4Percent: 0.12,
     fissureDetected: false,
-    speedMps: 2.1,
+    speedMps: 2.2,
     thermalMode: false,
     streamUrl: '',
   });
 
   const [mapPoints, setMapPoints] = useState<MapPoint[]>([]);
-  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: -180, y: 0 }]);
+  const [mapPath, setMapPath] = useState<{ x: number; y: number }[]>([{ x: -185, y: 0 }]);
   const [activeScanBeams, setActiveScanBeams] = useState<{ x1: number; y1: number; x2: number; y2: number; hit: boolean }[]>([]);
+
+  // Navigation patrol state
+  const waypointIdxRef = useRef<number>(0);
+  const dwellCountRef = useRef<number>(0);
+  const cycleCountRef = useRef<number>(1);
+
+  const [activePatrol, setActivePatrol] = useState<ActivePatrolInfo>({
+    index: 0,
+    totalWaypoints: PATROL_ROUTE.length,
+    currentWaypoint: PATROL_ROUTE[0],
+    nextWaypoint: PATROL_ROUTE[1],
+    distToNext: 45,
+    status: 'cruising',
+    cycleCount: 1,
+  });
 
   const [alerts, setAlerts] = useState<AlertItem[]>([
     {
@@ -156,7 +209,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       timestamp: new Date().toISOString(),
       severity: 'info',
       source: 'hexapod',
-      message: 'Hexapod LiDAR SLAM active. Autonomous multi-branch route exploration initiated.',
+      message: 'Hexapod LiDAR SLAM active. 100% Comprehensive Subterranean Multi-Branch Patrol initialized.',
     },
     {
       id: 'alt-002',
@@ -166,9 +219,6 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       message: '10 Wearable smart beacons locked. All atmospheric readings nominal.',
     }
   ]);
-
-  const targetNodeIdRef = useRef<string>('haulage_west');
-  const lastNodeIdRef = useRef<string>('portal');
 
   const clearMap = useCallback(() => {
     setMapPoints([]);
@@ -200,44 +250,124 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const interval = setInterval(() => {
       setHexapod((prev) => {
-        // Autonomous Multi-Direction Route Navigation
-        const targetNode = MINE_NAV_GRAPH[targetNodeIdRef.current] || MINE_NAV_GRAPH['portal'];
-        const dx = targetNode.x - prev.x;
-        const dy = targetNode.y - prev.y;
-        const distToTarget = Math.hypot(dx, dy);
+        let newX = prev.x;
+        let newY = prev.y;
+        let newHeading = prev.heading;
+        let effectiveSpeed = prev.speedMps;
+        let patrolStatus: 'cruising' | 'cornering' | 'inspecting' | 'evacuating' = 'cruising';
 
-        // When reaching a junction or dead-end, choose a new random connected corridor!
-        if (distToTarget < 6) {
-          const prevId = lastNodeIdRef.current;
-          lastNodeIdRef.current = targetNode.id;
+        // 1. Emergency Evacuation Protocol: Rush directly to Portal 01 (-185, 0)
+        if (evacActive) {
+          patrolStatus = 'evacuating';
+          effectiveSpeed = 2.8;
 
-          // Pick from neighbors: prefer non-backtracking branches unless at a dead end
-          const neighbors = targetNode.neighbors;
-          let nextNodeId = neighbors[Math.floor(Math.random() * neighbors.length)];
-          if (neighbors.length > 1 && Math.random() < 0.85) {
-            const forwardNeighbors = neighbors.filter((id) => id !== prevId);
-            if (forwardNeighbors.length > 0) {
-              nextNodeId = forwardNeighbors[Math.floor(Math.random() * forwardNeighbors.length)];
-            }
+          let targetX = -185;
+          let targetY = 0;
+
+          // If inside a branch, first route out of branch toward main haulage centerline
+          if (prev.x < -45 && prev.x > -75 && prev.y > 5) {
+            targetX = -60;
+            targetY = 0;
+          } else if (prev.x > 25 && prev.x < 55 && prev.y < -5) {
+            targetX = 40;
+            targetY = 20;
+          } else if (prev.x > 150 && prev.y > 15) {
+            targetX = 160;
+            targetY = 20;
           }
-          targetNodeIdRef.current = nextNodeId;
+
+          const dx = targetX - prev.x;
+          const dy = targetY - prev.y;
+          const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
+
+          let diff = desiredHeading - prev.heading;
+          while (diff > 180) diff -= 360;
+          while (diff < -180) diff += 360;
+          const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), 14);
+          newHeading = Math.round((prev.heading + turnStep + 360) % 360);
+
+          const stepDist = effectiveSpeed * 0.12;
+          newX = +(prev.x + Math.cos((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
+          newY = +(prev.y + Math.sin((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
+
+        } else {
+          // 2. Autonomous Multi-Branch Exploration Patrol
+          const totalPts = PATROL_ROUTE.length;
+          const currIdx = waypointIdxRef.current;
+          const currentTarget = PATROL_ROUTE[currIdx] || PATROL_ROUTE[0];
+          const nextTarget = PATROL_ROUTE[(currIdx + 1) % totalPts];
+
+          const dx = currentTarget.x - prev.x;
+          const dy = currentTarget.y - prev.y;
+          const distToTarget = Math.hypot(dx, dy);
+
+          // Handle Terminus Inspection Dwell (at dead-ends like ventilation shaft, stope face, sub-level)
+          if (dwellCountRef.current > 0) {
+            dwellCountRef.current -= 1;
+            effectiveSpeed = 0.0;
+            patrolStatus = 'inspecting';
+            // Slow smooth 360° radar sweep rotation while inspecting face
+            newHeading = Math.round((prev.heading + 6) % 360);
+
+            if (dwellCountRef.current === 0) {
+              // Dwell finished: advance to next return waypoint
+              const nextIdx = (currIdx + 1) % totalPts;
+              waypointIdxRef.current = nextIdx;
+              if (nextIdx === 0) cycleCountRef.current += 1;
+            }
+          } else {
+            // Check if arrived at waypoint
+            if (distToTarget < 3.8) {
+              if (currentTarget.dwellTicks && currentTarget.dwellTicks > 0) {
+                // Begin inspection dwell!
+                dwellCountRef.current = currentTarget.dwellTicks;
+                effectiveSpeed = 0.0;
+                patrolStatus = 'inspecting';
+              } else {
+                // Advance to next waypoint along the mine corridor
+                const nextIdx = (currIdx + 1) % totalPts;
+                waypointIdxRef.current = nextIdx;
+                if (nextIdx === 0) cycleCountRef.current += 1;
+              }
+            }
+
+            // Smooth steering towards waypoint
+            const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
+            let diff = desiredHeading - prev.heading;
+            while (diff > 180) diff -= 360;
+            while (diff < -180) diff += 360;
+
+            const isSharpTurn = Math.abs(diff) > 40;
+            patrolStatus = isSharpTurn ? 'cornering' : 'cruising';
+
+            // Decelerate smoothly on sharp cornering, accelerate on straight drifts
+            const targetSpeed = isSharpTurn ? Math.min(1.4, currentTarget.targetSpeed) : currentTarget.targetSpeed;
+            effectiveSpeed = +(prev.speedMps + (targetSpeed - prev.speedMps) * 0.25).toFixed(2);
+
+            const maxTurnStep = isSharpTurn ? 14 : 9;
+            const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), maxTurnStep);
+            newHeading = Math.round((prev.heading + turnStep + 360) % 360);
+
+            // Advance along heading vector smoothly (step = velocity * timeDelta)
+            const stepDist = effectiveSpeed * 0.12;
+            const radHeading = (newHeading * Math.PI) / 180;
+            newX = +(prev.x + Math.cos(radHeading) * stepDist).toFixed(2);
+            newY = +(prev.y + Math.sin(radHeading) * stepDist).toFixed(2);
+          }
+
+          // Update active patrol state
+          setActivePatrol({
+            index: currIdx,
+            totalWaypoints: totalPts,
+            currentWaypoint: currentTarget,
+            nextWaypoint: nextTarget,
+            distToNext: Math.max(1, Math.round(distToTarget)),
+            status: patrolStatus,
+            cycleCount: cycleCountRef.current,
+          });
         }
 
-        // Smooth steering towards destination waypoint
-        const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
-        let diff = desiredHeading - prev.heading;
-        while (diff > 180) diff -= 360;
-        while (diff < -180) diff += 360;
-        const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), 8);
-        const newHeading = Math.round((prev.heading + turnStep + 360) % 360);
-
-        // Advance along heading vector smoothly at 0.75m/tick (~2.1 m/s rover speed)
-        const stepDist = 0.75;
-        const radHeading = (newHeading * Math.PI) / 180;
-        const newX = +(prev.x + Math.cos(radHeading) * stepDist).toFixed(2);
-        const newY = +(prev.y + Math.sin(radHeading) * stepDist).toFixed(2);
-
-        const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.5);
+        const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.2);
 
         // Cast 36 High-Resolution 360-Degree LiDAR Beams
         const beams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] = [];
@@ -263,22 +393,23 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             newPointsBatch.push({
               x: px,
               y: py,
-              gasPpm: currentGas + (Math.random() - 0.5) * 10
+              gasPpm: currentGas + (Math.random() - 0.5) * 8
             });
           }
         }
 
         setActiveScanBeams(beams);
 
+        // Retain SLAM points cloud revealing discovered walls
         setMapPoints((old) => {
           const combined = [...old, ...newPointsBatch];
-          return combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
+          return combined.length > 2200 ? combined.slice(combined.length - 2200) : combined;
         });
 
-        // Store up to 1000 points so the entire multi-branch route persists like Google Maps
+        // Store up to 1200 points so the entire traveled multi-branch route persists
         setMapPath((old) => {
           const p = [...old, { x: newX, y: newY }];
-          return p.length > 1000 ? p.slice(p.length - 1000) : p;
+          return p.length > 1200 ? p.slice(p.length - 1200) : p;
         });
 
         return {
@@ -286,6 +417,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           x: newX,
           y: newY,
           heading: newHeading,
+          speedMps: effectiveSpeed,
           gasPpm: currentGas,
           coPpm: Number((currentGas * 0.016).toFixed(1)),
           ch4Percent: Number((currentGas * 0.0006).toFixed(3)),
@@ -301,7 +433,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 120);
 
     return () => clearInterval(interval);
-  }, [simulationRunning]);
+  }, [simulationRunning, evacActive]);
 
   const triggerHazard = useCallback((type: 'high_co' | 'low_o2' | 'methane' | 'fissure' | 'helmet_off' | 'cardiac' | 'evacuate') => {
     const timestamp = new Date().toISOString();
@@ -394,8 +526,11 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setZones(initialZones);
     setSafetyScore(96);
     setEvacActive(false);
+    waypointIdxRef.current = 0;
+    dwellCountRef.current = 0;
+    cycleCountRef.current = 1;
     setHexapod({
-      x: 0,
+      x: -185,
       y: 0,
       heading: 0,
       battery: 92,
@@ -406,7 +541,7 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       o2Percent: 20.8,
       ch4Percent: 0.12,
       fissureDetected: false,
-      speedMps: 0.45,
+      speedMps: 2.2,
       thermalMode: false,
       streamUrl: '',
     });
@@ -470,6 +605,8 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       mapPoints,
       mapPath,
       activeScanBeams,
+      activePatrol,
+      patrolRoute: PATROL_ROUTE,
       zones,
       alerts,
       safetyScore,

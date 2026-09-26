@@ -61,3 +61,26 @@ export interface ZoneStatus {
   ventilationPct: number;
   stability: 'stable' | 'monitoring' | 'compromised';
 }
+
+export interface MinePatrolWaypoint {
+  id: string;
+  name: string;
+  zone: string;
+  x: number;
+  y: number;
+  turnType: 'straight' | 'left' | 'right' | 'uturn';
+  turnPrompt: string;
+  targetSpeed: number;
+  dwellTicks?: number;
+  inspectionNote?: string;
+}
+
+export interface ActivePatrolInfo {
+  index: number;
+  totalWaypoints: number;
+  currentWaypoint: MinePatrolWaypoint;
+  nextWaypoint: MinePatrolWaypoint;
+  distToNext: number;
+  status: 'cruising' | 'cornering' | 'inspecting' | 'evacuating';
+  cycleCount: number;
+}

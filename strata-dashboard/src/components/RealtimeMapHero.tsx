@@ -3,7 +3,7 @@ import { useDashboard } from '../context/DashboardContext';
 import { buildCorridorPath } from '../utils/corridorMapBuilder';
 
 export const RealtimeMapHero: React.FC = () => {
-  const { hexapod, mapPoints, mapPath, activeScanBeams, evacActive, clearMap } = useDashboard();
+  const { hexapod, mapPoints, mapPath, activeScanBeams, activePatrol, evacActive, clearMap } = useDashboard();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -107,22 +107,44 @@ export const RealtimeMapHero: React.FC = () => {
     return p;
   }, []);
 
-  // Compute current navigation turn prompt based on hexapod position
+  // Compute current navigation turn prompt based on activePatrol state
   const currentNavPrompt = useMemo(() => {
-    const x = hexapod.x;
-    const y = hexapod.y;
-    if (x < -60) {
-      return { icon: '↑', text: 'Proceed straight along Main Haulage Drift', dist: `${Math.max(4, Math.round(Math.abs(-60 - x)))}m to South Junction` };
-    } else if (x >= -75 && x <= -45 && y > 8) {
-      return { icon: '↰', text: 'Exploring South Ventilation Incline', dist: `${Math.max(4, Math.round(105 - y))}m to Shaft Terminus` };
-    } else if (x >= 25 && x <= 55 && y < 8) {
-      return { icon: '↱', text: 'Surveying North Extraction Crosscut', dist: `${Math.max(4, Math.round(Math.abs(-115 - y)))}m to Stope Face` };
-    } else if (x > 150 && y > 15) {
-      return { icon: '↱', text: 'Mapping Sub-Level 08 Access Drift', dist: `${Math.max(4, Math.round(270 - x))}m to Heading` };
-    } else {
-      return { icon: '↑', text: 'Navigating Central Haulage Drift', dist: `${Math.max(4, Math.round(160 - x))}m to Sub-Level 08 Split` };
+    if (evacActive || activePatrol.status === 'evacuating') {
+      return {
+        icon: '⚠️',
+        title: 'EMERGENCY EVACUATION',
+        text: 'Direct egress path to Portal 01 (West Haulage)',
+        dist: 'URGENT RETREAT',
+        color: 'bg-[#B71C1C] border-[#7F1D1D]',
+        badge: 'EVAC ACTIVE'
+      };
     }
-  }, [hexapod.x, hexapod.y]);
+
+    if (activePatrol.status === 'inspecting') {
+      return {
+        icon: '🔍',
+        title: '360° INSPECTION SCAN',
+        text: activePatrol.currentWaypoint.turnPrompt,
+        dist: 'DWELL & SCAN',
+        color: 'bg-[#D97706] border-[#B45309]',
+        badge: 'SCANNING'
+      };
+    }
+
+    let icon = '↑';
+    if (activePatrol.currentWaypoint.turnType === 'left') icon = '↰';
+    else if (activePatrol.currentWaypoint.turnType === 'right') icon = '↱';
+    else if (activePatrol.currentWaypoint.turnType === 'uturn') icon = '↶';
+
+    return {
+      icon,
+      title: activePatrol.currentWaypoint.zone,
+      text: activePatrol.currentWaypoint.turnPrompt,
+      dist: `${activePatrol.distToNext}m to ${activePatrol.nextWaypoint.name}`,
+      color: 'bg-[#137333] border-[#0d5224]',
+      badge: activePatrol.status === 'cornering' ? 'CORNERING' : 'CRUISING'
+    };
+  }, [activePatrol, evacActive]);
 
   // 60FPS Hardware-Accelerated Canvas Rendering Loop
   useEffect(() => {
@@ -547,70 +569,88 @@ export const RealtimeMapHero: React.FC = () => {
           </span>
         </div>
 
-        {/* Action Controls */}
+        {/* Action Controls: Strictly Proportional Uniform h-8 Buttons */}
         <div className="flex items-center gap-2 text-xs">
           {/* LiDAR Laser Rays Toggle */}
           <button
-            onClick={() => setShowLidar(s => !s)}
-            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+            onClick={() => setShowLidar((s) => !s)}
+            className={`h-8 px-3 rounded-lg border font-semibold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
               showLidar
-                ? 'bg-[#06B6D4]/10 border-[#06B6D4]/40 text-[#0891B2]'
+                ? 'bg-[#06B6D4]/10 border-[#06B6D4]/50 text-[#0891B2]'
                 : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
             }`}
             title="Toggle 360-degree LiDAR laser beams and wall strike detection"
           >
             <span className={`w-2 h-2 rounded-full ${showLidar ? 'bg-[#06B6D4] animate-ping' : 'bg-gray-400'}`}></span>
-            <span>{showLidar ? 'LiDAR Rays: 360° [ON]' : 'LiDAR Rays [OFF]'}</span>
+            <span>360° LiDAR</span>
+            <span className={`text-[10px] px-1 py-0.2 rounded font-mono font-bold ${showLidar ? 'bg-[#06B6D4]/20 text-[#0891B2]' : 'bg-gray-100 text-gray-500'}`}>
+              {showLidar ? 'ON' : 'OFF'}
+            </span>
           </button>
 
           {/* SLAM Point Cloud Toggle */}
           <button
-            onClick={() => setShowPointCloud(s => !s)}
-            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+            onClick={() => setShowPointCloud((s) => !s)}
+            className={`h-8 px-3 rounded-lg border font-semibold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
               showPointCloud
-                ? 'bg-[#10B981]/10 border-[#10B981]/40 text-[#059669]'
+                ? 'bg-[#10B981]/10 border-[#10B981]/50 text-[#059669]'
                 : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
             }`}
             title="Toggle revealed cave wall SLAM point cloud"
           >
             <span className={`w-2 h-2 rounded-full ${showPointCloud ? 'bg-[#10B981]' : 'bg-gray-400'}`}></span>
-            <span>{showPointCloud ? `SLAM Points (${mapPoints.length})` : 'SLAM Points [OFF]'}</span>
+            <span>SLAM Cloud</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded font-mono font-bold bg-[#10B981]/15 text-[#059669]">
+              {mapPoints.length}
+            </span>
           </button>
 
+          {/* Follow / Recenter Mode Toggle */}
           <button
             onClick={handleCenterRobot}
-            className={`px-3 py-1.5 rounded-lg border font-semibold transition-all cursor-pointer ${
+            className={`h-8 px-3 rounded-lg border font-semibold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
               followRobot
-                ? 'bg-[#2563EB]/10 border-[#2563EB]/40 text-[#2563EB]'
+                ? 'bg-[#2563EB]/10 border-[#2563EB]/50 text-[#2563EB]'
                 : 'bg-white border-[#E6DFD5] text-[#6B685F] hover:bg-[#F3EFE6]'
             }`}
+            title={followRobot ? 'Camera auto-tracking rover position' : 'Click to lock camera onto rover'}
           >
-            {followRobot ? '● Recenter Navigation' : 'Center Navigation'}
+            <span className={`w-2 h-2 rounded-full ${followRobot ? 'bg-[#2563EB] animate-pulse' : 'bg-gray-400'}`}></span>
+            <span>{followRobot ? 'Tracking' : 'Follow Rover'}</span>
           </button>
 
-          <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-[#E6DFD5]">
+          {/* Proportional Segmented Zoom Group */}
+          <div className="h-8 inline-flex items-center bg-white border border-[#E6DFD5] rounded-lg shadow-xs overflow-hidden">
             <button
-              onClick={() => setZoom(z => Math.max(0.5, +(z - 0.2).toFixed(2)))}
-              className="w-7 h-7 rounded text-[#1F2421] hover:bg-[#F3EFE6] flex items-center justify-center font-bold text-sm cursor-pointer"
+              onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.2).toFixed(2)))}
+              className="w-7 h-full flex items-center justify-center text-[#1F2421] hover:bg-[#F3EFE6] font-bold text-sm cursor-pointer border-r border-[#E6DFD5]"
+              title="Zoom Out"
             >
-              -
+              −
             </button>
-            <span className="text-[#1F2421] text-xs min-w-[40px] text-center font-mono font-semibold">
+            <span className="px-2 min-w-[42px] text-center font-mono font-bold text-xs text-[#1F2421] select-none">
               {Math.round(zoom * 100)}%
             </span>
             <button
-              onClick={() => setZoom(z => Math.min(3.2, +(z + 0.2).toFixed(2)))}
-              className="w-7 h-7 rounded text-[#1F2421] hover:bg-[#F3EFE6] flex items-center justify-center font-bold text-sm cursor-pointer"
+              onClick={() => setZoom((z) => Math.min(3.2, +(z + 0.2).toFixed(2)))}
+              className="w-7 h-full flex items-center justify-center text-[#1F2421] hover:bg-[#F3EFE6] font-bold text-sm cursor-pointer border-l border-[#E6DFD5]"
+              title="Zoom In"
             >
               +
             </button>
           </div>
 
+          {/* Reset Route Button */}
           <button
             onClick={clearMap}
-            className="px-3 py-1.5 rounded-lg bg-white border border-[#E6DFD5] text-[#6B685F] hover:text-[#1F2421] hover:bg-[#F3EFE6] transition-all cursor-pointer font-medium"
+            className="h-8 px-3 rounded-lg bg-white border border-[#E6DFD5] text-[#6B685F] hover:text-[#B71C1C] hover:border-[#B71C1C]/40 hover:bg-[#F3EFE6] transition-all cursor-pointer font-semibold text-xs flex items-center gap-1.5 shadow-xs"
+            title="Clear recorded traveled path and reset SLAM points"
           >
-            Reset Route
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            <span>Reset</span>
           </button>
         </div>
       </div>
@@ -630,38 +670,42 @@ export const RealtimeMapHero: React.FC = () => {
         />
 
         {/* GOOGLE MAPS SIGNATURE TURN-BY-TURN NAVIGATION BANNER (Top-Left HUD) */}
-        <div className="absolute top-3 left-3 bg-[#137333] border border-[#0d5224] rounded-xl p-2.5 px-3.5 shadow-lg max-w-[270px] flex items-center gap-2.5 font-['Plus_Jakarta_Sans'] text-white select-none">
-          <div className="w-9 h-9 rounded-lg bg-white/15 border border-white/25 flex items-center justify-center text-xl font-black shadow-inner shrink-0">
+        <div className={`absolute top-3 left-3 ${currentNavPrompt.color} border rounded-xl p-2 px-3 shadow-lg max-w-[270px] flex items-center gap-2.5 font-['Plus_Jakarta_Sans'] text-white select-none`}>
+          <div className="w-8 h-8 rounded-lg bg-white/20 border border-white/30 flex items-center justify-center text-lg font-black shadow-inner shrink-0">
             {currentNavPrompt.icon}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-black text-emerald-200 tracking-wider uppercase flex items-center gap-1.5 truncate">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-ping shrink-0"></span>
-              <span className="truncate">{currentNavPrompt.dist}</span>
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-black text-white/90 uppercase tracking-wider truncate">
+                {currentNavPrompt.title}
+              </span>
+              <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-black/25 text-white shrink-0 font-bold">
+                {currentNavPrompt.badge}
+              </span>
             </div>
-            <div className="text-xs font-bold text-white leading-tight mt-0.5 truncate">
+            <div className="text-[11px] font-bold text-white leading-tight mt-0.5 truncate">
               {currentNavPrompt.text}
             </div>
-            <div className="text-[10px] text-emerald-100/80 font-medium mt-0.5 flex items-center gap-1.5 truncate">
-              <span>Auto Nav</span>
+            <div className="text-[10px] text-white/80 font-mono mt-0.5 flex items-center gap-1.5 truncate">
+              <span>{currentNavPrompt.dist}</span>
               <span>·</span>
-              <span className="font-mono">{hexapod.speedMps} m/s</span>
+              <span>{hexapod.speedMps} m/s</span>
             </div>
           </div>
         </div>
 
-        {/* Reference Scale Bar in Top-Right Corner */}
-        <div className="absolute top-3 right-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-1.5 px-3 flex items-center gap-2 shadow-xs backdrop-blur-xs select-none">
+        {/* Reference Scale Bar in Top-Right Corner: Height Matches h-8 Toolbar */}
+        <div className="absolute top-3 right-3 h-8 bg-white/95 border border-[#E6DFD5] rounded-lg px-2.5 flex items-center gap-2 shadow-xs backdrop-blur-xs select-none">
           <div className="flex items-center gap-1">
             <span className="w-0.5 h-2.5 bg-[#1F2421]"></span>
             <span style={{ width: `${Math.round(20 * zoom)}px` }} className="h-0.5 bg-[#1F2421]"></span>
             <span className="w-0.5 h-2.5 bg-[#1F2421]"></span>
           </div>
-          <span className="text-[10px] font-mono text-[#6B685F] font-semibold">10m SCALE</span>
+          <span className="text-[10px] font-mono text-[#6B685F] font-bold">10m SCALE</span>
         </div>
 
         {/* GOOGLE MAPS STYLE BOTTOM-LEFT ROUTE LEGEND */}
-        <div className="absolute bottom-3 left-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 shadow-md backdrop-blur-sm text-[10px] font-mono select-none max-w-[270px]">
+        <div className="absolute bottom-3 left-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 shadow-xs backdrop-blur-sm text-[10px] font-mono select-none max-w-[250px]">
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             <div className="flex items-center gap-1.5 truncate">
               <span className="w-2.5 h-1 bg-[#06B6D4] rounded-xs shrink-0"></span>
@@ -669,35 +713,36 @@ export const RealtimeMapHero: React.FC = () => {
             </div>
             <div className="flex items-center gap-1.5 truncate">
               <span className="w-2 h-2 rounded-full bg-[#059669] shrink-0"></span>
-              <span className="text-[#1F2421] font-semibold truncate">SLAM Walls</span>
+              <span className="text-[#1F2421] font-semibold truncate">SLAM Cloud</span>
             </div>
             <div className="flex items-center gap-1.5 truncate">
               <span className="w-2.5 h-1 bg-[#2563EB] rounded-xs shrink-0"></span>
-              <span className="text-[#1F2421] font-semibold truncate">Route Line</span>
+              <span className="text-[#1F2421] font-semibold truncate">Route Path</span>
             </div>
             <div className="flex items-center gap-1.5 truncate">
               <span className="w-2 h-2 rounded-full bg-[#16A34A] text-white flex items-center justify-center text-[7px] font-bold shrink-0">A</span>
-              <span className="text-[#1F2421] font-semibold truncate">Start / Exits</span>
+              <span className="text-[#1F2421] font-semibold truncate">Portal Base</span>
             </div>
           </div>
         </div>
 
         {/* GOOGLE MAPS STYLE TRIP BOTTOM CARD */}
-        <div className="absolute bottom-3 right-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3.5 shadow-md flex items-center gap-3 backdrop-blur-md select-none">
+        <div className="absolute bottom-3 right-3 bg-white/95 border border-[#E6DFD5] rounded-xl p-2 px-3 shadow-md flex items-center gap-2.5 backdrop-blur-md select-none">
           <div className="flex flex-col">
             <div className="flex items-baseline gap-1">
-              <span className="text-sm font-black text-[#137333]">{Math.max(1, Math.round((mapPath.length * 0.4) / 10))} min</span>
+              <span className="text-xs font-black text-[#137333]">Cycle #{activePatrol.cycleCount}</span>
               <span className="text-[10px] text-[#6B685F] font-semibold">({exploredMeters}m)</span>
             </div>
             <div className="text-[10px] text-[#6B685F] flex items-center gap-1 font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A]"></span>
-              <span>Optimal Route</span>
+              <span>Pt {activePatrol.index + 1}/{activePatrol.totalWaypoints}</span>
             </div>
           </div>
           <div className="h-6 w-px bg-[#E6DFD5]"></div>
           <button
             onClick={handleCenterRobot}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#2563EB] text-white text-[11px] font-bold shadow-xs hover:bg-[#1D4ED8] transition-all cursor-pointer"
+            className="h-7 px-2.5 rounded-lg bg-[#2563EB] text-white text-[11px] font-bold shadow-xs hover:bg-[#1D4ED8] transition-all flex items-center gap-1 cursor-pointer"
+            title="Focus Camera on Rover"
           >
             <span>🧭</span>
             <span>Recenter</span>
@@ -706,27 +751,29 @@ export const RealtimeMapHero: React.FC = () => {
       </div>
 
       {/* Bottom Exploration Summary Strip */}
-      <div className="p-3.5 px-6 bg-[#FAF8F3] border-t border-[#E6DFD5] grid grid-cols-2 md:grid-cols-4 gap-4 text-center text-xs">
+      <div className="p-3.5 px-6 bg-[#FAF8F3] border-t border-[#E6DFD5] grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs">
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Active Navigation</span>
-          <span className="font-bold text-[#2563EB] text-sm mt-0.5 block">Autonomous Waypoints</span>
-        </div>
-        <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Safe Route to Exit</span>
-          <span className="font-bold text-[#2E7D32] text-sm mt-0.5 block">
-            {evacActive ? 'Blocked by Hazard' : 'Clear Route → Portal 01'}
+          <span className="text-xs text-[#6B685F] block font-medium">Active Patrol Sector</span>
+          <span className="font-bold text-[#2563EB] text-xs mt-0.5 block truncate">
+            {activePatrol.currentWaypoint.zone}
           </span>
         </div>
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Atmospheric Status</span>
-          <span className={`font-bold text-sm mt-0.5 block ${hexapod.gasPpm > 400 ? 'text-[#B71C1C]' : 'text-[#2E7D32]'}`}>
+          <span className="text-xs text-[#6B685F] block font-medium">Egress Route</span>
+          <span className={`font-bold text-xs mt-0.5 block truncate ${evacActive ? 'text-[#B71C1C]' : 'text-[#2E7D32]'}`}>
+            {evacActive ? 'Evacuation In Progress' : 'Direct Path → Portal 01'}
+          </span>
+        </div>
+        <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
+          <span className="text-xs text-[#6B685F] block font-medium">Strata Atmosphere</span>
+          <span className={`font-bold text-xs mt-0.5 block truncate ${hexapod.gasPpm > 400 ? 'text-[#B71C1C]' : 'text-[#2E7D32]'}`}>
             {Math.round(hexapod.gasPpm)} PPM Nominal
           </span>
         </div>
         <div className="p-2.5 bg-white rounded-xl border border-[#E6DFD5] shadow-xs">
-          <span className="text-xs text-[#6B685F] block font-medium">Rover Velocity</span>
-          <span className="font-bold text-[#C85A32] text-sm mt-0.5 block">
-            {hexapod.speedMps} m/s ({hexapod.heading}°)
+          <span className="text-xs text-[#6B685F] block font-medium">Hexapod Velocity</span>
+          <span className="font-bold text-[#C85A32] text-xs mt-0.5 block truncate">
+            {hexapod.speedMps} m/s ({hexapod.heading}° Azimuth)
           </span>
         </div>
       </div>
