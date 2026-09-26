@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { DashboardTab, WorkerData, HexapodState, MapPoint, ZoneStatus, AlertItem, MinePatrolWaypoint, ActivePatrolInfo } from '../types';
+
+const BACKEND_URL = 'http://localhost:5001';
 
 interface DashboardContextType {
   activeTab: DashboardTab;
@@ -19,7 +22,7 @@ interface DashboardContextType {
   simulationRunning: boolean;
   toggleSiren: () => void;
   toggleSimulation: () => void;
-  triggerHazard: (type: 'high_co' | 'low_o2' | 'methane' | 'fissure' | 'helmet_off' | 'cardiac' | 'evacuate') => void;
+  triggerHazard: (type: 'high_co' | 'low_o2' | 'methane' | 'fissure' | 'helmet_off' | 'cardiac' | 'evacuate' | 'seismic') => void;
   resetSystem: () => void;
   acknowledgeAlert: (id: string) => void;
   sendRobotCommand: (cmd: 'forward' | 'backward' | 'left' | 'right' | 'scan' | 'stop') => void;
@@ -225,218 +228,280 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setMapPath([{ x: hexapod.x, y: hexapod.y }]);
   }, [hexapod.x, hexapod.y]);
 
-  // Real-time Incremental Map Building Engine (Phase 3 Spec)
+  // ─── Backend Connection & Fallback Logic ───────────────────────────────────
+  const socketRef = useRef<Socket | null>(null);
+  const backendConnected = useRef<boolean>(false);
+
+  // Attempt backend connection on mount; fall back to local sim on failure
   useEffect(() => {
-    if (!simulationRunning) return;
+    let socket: Socket | null = null;
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null;
 
-    // Physical LiDAR ray tracer testing distance to tunnel walls (half-width = 15.5m)
-    const getTunnelDistance = (x: number, y: number, angleDeg: number): number => {
-      const rad = (angleDeg * Math.PI) / 180;
-      const cosA = Math.cos(rad);
-      const sinA = Math.sin(rad);
+    const connectToBackend = async () => {
+      try {
+        // 1. Fetch initial state from backend REST API
+        const res = await fetch(`${BACKEND_URL}/api/state`);
+        if (!res.ok) throw new Error(`Backend returned ${res.status}`);
+        const data = await res.json();
 
-      for (let d = 3; d < 72; d += 1.5) {
-        const testX = x + cosA * d;
-        const testY = y + sinA * d;
+        // Seed state from backend (source of truth)
+        setWorkers(data.workers || initialWorkers);
+        setZones(data.zones || initialZones);
+        setHexapod(data.hexapod || hexapod);
+        setMapPoints(data.mapPoints || []);
+        setAlerts(data.alerts || []);
+        setSafetyScore(data.safetyScore ?? 96);
+        setEvacActive(data.evacActive ?? false);
 
-        const distToCenterline = minDistanceToTunnelNetwork(testX, testY);
-        // Wall boundary at 15.2 meters with minor surface roughness
-        if (distToCenterline >= 15.2) {
-          return d + (Math.random() - 0.5) * 0.5;
-        }
+        // 2. Connect WebSocket
+        socket = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+          console.log('[OSCORP] Backend connected via WebSocket');
+          backendConnected.current = true;
+        });
+
+        // Worker telemetry (single worker update)
+        socket.on('worker_update', (worker: WorkerData) => {
+          setWorkers(prev => prev.map(w => w.id === worker.id ? worker : w));
+        });
+
+        // Workers bulk update (simulation mode)
+        socket.on('workers_update', (updatedWorkers: WorkerData[]) => {
+          setWorkers(updatedWorkers);
+        });
+
+        // Hexapod telemetry
+        socket.on('hexapod_update', (hex: HexapodState) => {
+          setHexapod(hex);
+        });
+
+        // Map SLAM points + LiDAR beams
+        socket.on('map_update', (data: { newPoints: MapPoint[]; beams?: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] }) => {
+          setMapPoints(prev => {
+            const combined = [...prev, ...data.newPoints];
+            return combined.length > 2200 ? combined.slice(combined.length - 2200) : combined;
+          });
+          if (data.beams) {
+            setActiveScanBeams(data.beams);
+          }
+        });
+
+        // Path breadcrumb trail
+        socket.on('path_update', (pos: { x: number; y: number }) => {
+          setMapPath(prev => {
+            const p = [...prev, pos];
+            return p.length > 1200 ? p.slice(p.length - 1200) : p;
+          });
+        });
+
+        // Alerts
+        socket.on('alert', (alert: AlertItem) => {
+          setAlerts(prev => [alert, ...prev]);
+        });
+
+        // Alert acknowledgment
+        socket.on('alert_ack', (data: { alertId: string }) => {
+          setAlerts(prev => prev.map(a => a.id === data.alertId ? { ...a, acknowledged: true } : a));
+        });
+
+        // Safety score
+        socket.on('safety_score_update', (data: { safetyScore: number }) => {
+          setSafetyScore(data.safetyScore);
+        });
+
+        // Evacuation state
+        socket.on('evac_update', (data: { evacActive: boolean }) => {
+          setEvacActive(data.evacActive);
+        });
+
+        // Zones update (e.g. from seismic events)
+        socket.on('zones_update', (updatedZones: ZoneStatus[]) => {
+          setZones(updatedZones);
+        });
+
+        socket.on('connect_error', () => {
+          console.warn('[OSCORP] Backend connection lost — falling back to local simulation');
+          backendConnected.current = false;
+          startLocalSimulation();
+        });
+
+        socket.on('disconnect', () => {
+          console.warn('[OSCORP] Backend disconnected');
+          backendConnected.current = false;
+        });
+
+        // Auto-start backend simulation
+        fetch(`${BACKEND_URL}/api/simulate/start`, { method: 'POST' }).catch(() => {});
+
+      } catch (err) {
+        console.warn('[OSCORP] Backend unreachable — using local simulation fallback', err);
+        backendConnected.current = false;
+        startLocalSimulation();
       }
-      return 70;
     };
 
-    const interval = setInterval(() => {
-      setHexapod((prev) => {
-        let newX = prev.x;
-        let newY = prev.y;
-        let newHeading = prev.heading;
-        let effectiveSpeed = prev.speedMps;
-        let patrolStatus: 'cruising' | 'cornering' | 'inspecting' | 'evacuating' = 'cruising';
+    // ─── Local Simulation Fallback (existing logic preserved) ──────────────
+    const startLocalSimulation = () => {
+      if (fallbackInterval) return; // already running
 
-        // 1. Emergency Evacuation Protocol: Rush directly to Portal 01 (-185, 0)
-        if (evacActive) {
-          patrolStatus = 'evacuating';
-          effectiveSpeed = 2.8;
+      // Physical LiDAR ray tracer testing distance to tunnel walls (half-width = 15.5m)
+      const getTunnelDistance = (x: number, y: number, angleDeg: number): number => {
+        const rad = (angleDeg * Math.PI) / 180;
+        const cosA = Math.cos(rad);
+        const sinA = Math.sin(rad);
+        for (let d = 3; d < 72; d += 1.5) {
+          const testX = x + cosA * d;
+          const testY = y + sinA * d;
+          const distToCenterline = minDistanceToTunnelNetwork(testX, testY);
+          if (distToCenterline >= 15.2) return d + (Math.random() - 0.5) * 0.5;
+        }
+        return 70;
+      };
 
-          let targetX = -185;
-          let targetY = 0;
+      fallbackInterval = setInterval(() => {
+        if (!simulationRunning) return;
 
-          // If inside a branch, first route out of branch toward main haulage centerline
-          if (prev.x < -45 && prev.x > -75 && prev.y > 5) {
-            targetX = -60;
-            targetY = 0;
-          } else if (prev.x > 25 && prev.x < 55 && prev.y < -5) {
-            targetX = 40;
-            targetY = 20;
-          } else if (prev.x > 150 && prev.y > 15) {
-            targetX = 160;
-            targetY = 20;
-          }
+        setHexapod((prev) => {
+          let newX = prev.x;
+          let newY = prev.y;
+          let newHeading = prev.heading;
+          let effectiveSpeed = prev.speedMps;
+          let patrolStatus: 'cruising' | 'cornering' | 'inspecting' | 'evacuating' = 'cruising';
 
-          const dx = targetX - prev.x;
-          const dy = targetY - prev.y;
-          const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
-
-          let diff = desiredHeading - prev.heading;
-          while (diff > 180) diff -= 360;
-          while (diff < -180) diff += 360;
-          const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), 14);
-          newHeading = Math.round((prev.heading + turnStep + 360) % 360);
-
-          const stepDist = effectiveSpeed * 0.12;
-          newX = +(prev.x + Math.cos((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
-          newY = +(prev.y + Math.sin((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
-
-        } else {
-          // 2. Autonomous Multi-Branch Exploration Patrol
-          const totalPts = PATROL_ROUTE.length;
-          const currIdx = waypointIdxRef.current;
-          const currentTarget = PATROL_ROUTE[currIdx] || PATROL_ROUTE[0];
-          const nextTarget = PATROL_ROUTE[(currIdx + 1) % totalPts];
-
-          const dx = currentTarget.x - prev.x;
-          const dy = currentTarget.y - prev.y;
-          const distToTarget = Math.hypot(dx, dy);
-
-          // Handle Terminus Inspection Dwell (at dead-ends like ventilation shaft, stope face, sub-level)
-          if (dwellCountRef.current > 0) {
-            dwellCountRef.current -= 1;
-            effectiveSpeed = 0.0;
-            patrolStatus = 'inspecting';
-            // Slow smooth 360° radar sweep rotation while inspecting face
-            newHeading = Math.round((prev.heading + 6) % 360);
-
-            if (dwellCountRef.current === 0) {
-              // Dwell finished: advance to next return waypoint
-              const nextIdx = (currIdx + 1) % totalPts;
-              waypointIdxRef.current = nextIdx;
-              if (nextIdx === 0) cycleCountRef.current += 1;
-            }
-          } else {
-            // Check if arrived at waypoint
-            if (distToTarget < 3.8) {
-              if (currentTarget.dwellTicks && currentTarget.dwellTicks > 0) {
-                // Begin inspection dwell!
-                dwellCountRef.current = currentTarget.dwellTicks;
-                effectiveSpeed = 0.0;
-                patrolStatus = 'inspecting';
-              } else {
-                // Advance to next waypoint along the mine corridor
-                const nextIdx = (currIdx + 1) % totalPts;
-                waypointIdxRef.current = nextIdx;
-                if (nextIdx === 0) cycleCountRef.current += 1;
-              }
-            }
-
-            // Smooth steering towards waypoint
+          if (evacActive) {
+            patrolStatus = 'evacuating';
+            effectiveSpeed = 2.8;
+            let targetX = -185, targetY = 0;
+            if (prev.x < -45 && prev.x > -75 && prev.y > 5) { targetX = -60; targetY = 0; }
+            else if (prev.x > 25 && prev.x < 55 && prev.y < -5) { targetX = 40; targetY = 20; }
+            else if (prev.x > 150 && prev.y > 15) { targetX = 160; targetY = 20; }
+            const dx = targetX - prev.x, dy = targetY - prev.y;
             const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
             let diff = desiredHeading - prev.heading;
             while (diff > 180) diff -= 360;
             while (diff < -180) diff += 360;
-
-            const isSharpTurn = Math.abs(diff) > 40;
-            patrolStatus = isSharpTurn ? 'cornering' : 'cruising';
-
-            // Decelerate smoothly on sharp cornering, accelerate on straight drifts
-            const targetSpeed = isSharpTurn ? Math.min(1.4, currentTarget.targetSpeed) : currentTarget.targetSpeed;
-            effectiveSpeed = +(prev.speedMps + (targetSpeed - prev.speedMps) * 0.25).toFixed(2);
-
-            const maxTurnStep = isSharpTurn ? 14 : 9;
-            const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), maxTurnStep);
+            const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), 14);
             newHeading = Math.round((prev.heading + turnStep + 360) % 360);
-
-            // Advance along heading vector smoothly (step = velocity * timeDelta)
             const stepDist = effectiveSpeed * 0.12;
-            const radHeading = (newHeading * Math.PI) / 180;
-            newX = +(prev.x + Math.cos(radHeading) * stepDist).toFixed(2);
-            newY = +(prev.y + Math.sin(radHeading) * stepDist).toFixed(2);
-          }
+            newX = +(prev.x + Math.cos((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
+            newY = +(prev.y + Math.sin((newHeading * Math.PI) / 180) * stepDist).toFixed(2);
+          } else {
+            const totalPts = PATROL_ROUTE.length;
+            const currIdx = waypointIdxRef.current;
+            const currentTarget = PATROL_ROUTE[currIdx] || PATROL_ROUTE[0];
+            const nextTarget = PATROL_ROUTE[(currIdx + 1) % totalPts];
+            const dx = currentTarget.x - prev.x, dy = currentTarget.y - prev.y;
+            const distToTarget = Math.hypot(dx, dy);
 
-          // Update active patrol state
-          setActivePatrol({
-            index: currIdx,
-            totalWaypoints: totalPts,
-            currentWaypoint: currentTarget,
-            nextWaypoint: nextTarget,
-            distToNext: Math.max(1, Math.round(distToTarget)),
-            status: patrolStatus,
-            cycleCount: cycleCountRef.current,
-          });
-        }
+            if (dwellCountRef.current > 0) {
+              dwellCountRef.current -= 1;
+              effectiveSpeed = 0.0;
+              patrolStatus = 'inspecting';
+              newHeading = Math.round((prev.heading + 6) % 360);
+              if (dwellCountRef.current === 0) {
+                const nextIdx = (currIdx + 1) % totalPts;
+                waypointIdxRef.current = nextIdx;
+                if (nextIdx === 0) cycleCountRef.current += 1;
+              }
+            } else {
+              if (distToTarget < 3.8) {
+                if (currentTarget.dwellTicks && currentTarget.dwellTicks > 0) {
+                  dwellCountRef.current = currentTarget.dwellTicks;
+                  effectiveSpeed = 0.0;
+                  patrolStatus = 'inspecting';
+                } else {
+                  const nextIdx = (currIdx + 1) % totalPts;
+                  waypointIdxRef.current = nextIdx;
+                  if (nextIdx === 0) cycleCountRef.current += 1;
+                }
+              }
+              const desiredHeading = (Math.atan2(dy, dx) * 180) / Math.PI;
+              let diff = desiredHeading - prev.heading;
+              while (diff > 180) diff -= 360;
+              while (diff < -180) diff += 360;
+              const isSharpTurn = Math.abs(diff) > 40;
+              patrolStatus = isSharpTurn ? 'cornering' : 'cruising';
+              const targetSpeed = isSharpTurn ? Math.min(1.4, currentTarget.targetSpeed) : currentTarget.targetSpeed;
+              effectiveSpeed = +(prev.speedMps + (targetSpeed - prev.speedMps) * 0.25).toFixed(2);
+              const maxTurnStep = isSharpTurn ? 14 : 9;
+              const turnStep = Math.sign(diff) * Math.min(Math.abs(diff), maxTurnStep);
+              newHeading = Math.round((prev.heading + turnStep + 360) % 360);
+              const stepDist = effectiveSpeed * 0.25;
+              const radHeading = (newHeading * Math.PI) / 180;
+              newX = +(prev.x + Math.cos(radHeading) * stepDist).toFixed(2);
+              newY = +(prev.y + Math.sin(radHeading) * stepDist).toFixed(2);
+            }
 
-        const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.2);
-
-        // Cast 36 High-Resolution 360-Degree LiDAR Beams
-        const beams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] = [];
-        const newPointsBatch: MapPoint[] = [];
-
-        for (let i = 0; i < 36; i++) {
-          const angleDeg = (i * 10 + newHeading) % 360;
-          const dist = getTunnelDistance(newX, newY, angleDeg);
-          const rad = (angleDeg * Math.PI) / 180;
-          const px = newX + dist * Math.cos(rad);
-          const py = newY + dist * Math.sin(rad);
-
-          const hit = dist < 65;
-          beams.push({
-            x1: newX,
-            y1: newY,
-            x2: px,
-            y2: py,
-            hit
-          });
-
-          if (hit) {
-            newPointsBatch.push({
-              x: px,
-              y: py,
-              gasPpm: currentGas + (Math.random() - 0.5) * 8
+            setActivePatrol({
+              index: currIdx, totalWaypoints: totalPts,
+              currentWaypoint: currentTarget, nextWaypoint: nextTarget,
+              distToNext: Math.max(1, Math.round(distToTarget)),
+              status: patrolStatus, cycleCount: cycleCountRef.current,
             });
           }
-        }
 
-        setActiveScanBeams(beams);
+          const currentGas = Math.max(140, prev.gasPpm + (Math.random() - 0.5) * 2.2);
+          const beams: { x1: number; y1: number; x2: number; y2: number; hit: boolean }[] = [];
+          const newPointsBatch: MapPoint[] = [];
+          for (let i = 0; i < 36; i++) {
+            const angleDeg = (i * 10 + newHeading) % 360;
+            const dist = getTunnelDistance(newX, newY, angleDeg);
+            const rad = (angleDeg * Math.PI) / 180;
+            const px = newX + dist * Math.cos(rad), py = newY + dist * Math.sin(rad);
+            const hit = dist < 65;
+            beams.push({ x1: newX, y1: newY, x2: px, y2: py, hit });
+            if (hit) newPointsBatch.push({ x: px, y: py, gasPpm: currentGas + (Math.random() - 0.5) * 8 });
+          }
 
-        // Retain SLAM points cloud revealing discovered walls
-        setMapPoints((old) => {
-          const combined = [...old, ...newPointsBatch];
-          return combined.length > 2200 ? combined.slice(combined.length - 2200) : combined;
+          setActiveScanBeams(beams);
+          setMapPoints((old) => {
+            const combined = [...old, ...newPointsBatch];
+            return combined.length > 2200 ? combined.slice(combined.length - 2200) : combined;
+          });
+          setMapPath((old) => {
+            const p = [...old, { x: newX, y: newY }];
+            return p.length > 1200 ? p.slice(p.length - 1200) : p;
+          });
+
+          return {
+            ...prev, x: newX, y: newY, heading: newHeading, speedMps: effectiveSpeed,
+            gasPpm: currentGas, coPpm: Number((currentGas * 0.016).toFixed(1)),
+            ch4Percent: Number((currentGas * 0.0006).toFixed(3)),
+            battery: Math.max(12, prev.battery - 0.001),
+          };
         });
 
-        // Store up to 1200 points so the entire traveled multi-branch route persists
-        setMapPath((old) => {
-          const p = [...old, { x: newX, y: newY }];
-          return p.length > 1200 ? p.slice(p.length - 1200) : p;
-        });
+        setWorkers((prev) => prev.map((w) => ({
+          ...w, bpm: Math.round(Math.min(150, Math.max(58, w.bpm + (Math.random() - 0.5) * 1.5))),
+        })));
+      }, 120);
+    };
 
-        return {
-          ...prev,
-          x: newX,
-          y: newY,
-          heading: newHeading,
-          speedMps: effectiveSpeed,
-          gasPpm: currentGas,
-          coPpm: Number((currentGas * 0.016).toFixed(1)),
-          ch4Percent: Number((currentGas * 0.0006).toFixed(3)),
-          battery: Math.max(12, prev.battery - 0.001),
-        };
-      });
+    connectToBackend();
 
-      setWorkers((prev) => prev.map((w) => ({
-        ...w,
-        bpm: Math.round(Math.min(150, Math.max(58, w.bpm + (Math.random() - 0.5) * 1.5))),
-      })));
+    return () => {
+      if (socket) { socket.disconnect(); socketRef.current = null; }
+      if (fallbackInterval) clearInterval(fallbackInterval);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    }, 120);
-
-    return () => clearInterval(interval);
-  }, [simulationRunning, evacActive]);
-
-  const triggerHazard = useCallback((type: 'high_co' | 'low_o2' | 'methane' | 'fissure' | 'helmet_off' | 'cardiac' | 'evacuate') => {
+  const triggerHazard = useCallback((type: 'high_co' | 'low_o2' | 'methane' | 'fissure' | 'helmet_off' | 'cardiac' | 'evacuate' | 'seismic') => {
     const timestamp = new Date().toISOString();
+    
+    // If backend connected, proxy hazard trigger to backend for simulated events
+    // For 'seismic', we can manually call the new /api/seismic endpoint
+    if (backendConnected.current && type === 'seismic') {
+      fetch(`${BACKEND_URL}/api/seismic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zone: 'Zone A - Stope 4', magnitude: 6.2, confidence: 0.98 })
+      }).catch(() => {});
+      return; // Backend will push the updates back via websockets
+    }
+
     switch (type) {
       case 'high_co':
         setHexapod((h) => ({ ...h, coPpm: 72.0, gasPpm: 850 }));
@@ -518,6 +583,18 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           }, ...a]);
         }
         break;
+      case 'seismic':
+        setZones(prev => prev.map(z => z.id === 'Z-A' ? { ...z, stability: 'compromised' } : z));
+        setSafetyScore(40);
+        setEvacActive(true);
+        setAlerts((a) => [{
+          id: `alt-${Date.now()}`,
+          timestamp,
+          severity: 'critical',
+          source: 'system',
+          message: 'SEISMIC EVENT: Magnitude 6.2 detected in Zone A - Stope 4. EVACUATION PROTOCOL ACTIVATED.',
+        }, ...a]);
+        break;
     }
   }, [evacActive]);
 
@@ -563,10 +640,27 @@ export const DashboardProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, []);
 
   const toggleSimulation = useCallback(() => {
-    setSimulationRunning((r) => !r);
+    setSimulationRunning((r) => {
+      const next = !r;
+      // If backend connected, control backend simulation
+      if (backendConnected.current) {
+        fetch(`${BACKEND_URL}/api/simulate/${next ? 'start' : 'stop'}`, { method: 'POST' }).catch(() => {});
+      }
+      return next;
+    });
   }, []);
 
   const sendRobotCommand = useCallback((cmd: 'forward' | 'backward' | 'left' | 'right' | 'scan' | 'stop') => {
+    // Forward command to backend if connected
+    if (backendConnected.current) {
+      fetch(`${BACKEND_URL}/api/hexapod/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd }),
+      }).catch(() => {});
+    }
+
+    // Also apply locally for immediate UI feedback
     setHexapod((h) => {
       let dx = 0;
       let dy = 0;

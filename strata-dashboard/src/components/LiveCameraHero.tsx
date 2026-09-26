@@ -4,11 +4,12 @@ import { useDashboard } from '../context/DashboardContext';
 export const LiveCameraHero: React.FC = () => {
   const { hexapod, mapPoints, sendRobotCommand, triggerHazard } = useDashboard();
 
-  const [streamUrl, setStreamUrl] = useState<string>('');
   const [thermalMode, setThermalMode] = useState<boolean>(false);
   const [opticalOverlay, setOpticalOverlay] = useState<boolean>(true);
   const [showUrlModal, setShowUrlModal] = useState<boolean>(false);
   const [inputUrl, setInputUrl] = useState<string>('http://192.168.1.120:81/stream');
+  
+  const streamUrl = hexapod.streamUrl;
 
   return (
     <div className="bg-white rounded-2xl border border-[#E6DFD5] flex flex-col overflow-hidden shadow-sm h-full font-['Plus_Jakarta_Sans']">
@@ -262,7 +263,11 @@ export const LiveCameraHero: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 text-xs">
               <button
                 onClick={() => {
-                  setStreamUrl('');
+                  fetch('http://localhost:5001/api/hexapod/camera_url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ streamUrl: '' }),
+                  }).catch(() => {});
                   setShowUrlModal(false);
                 }}
                 className="px-4 py-2 rounded-xl bg-[#F3EFE6] text-[#6B685F] hover:text-[#1F2421] font-medium"
@@ -271,7 +276,11 @@ export const LiveCameraHero: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setStreamUrl(inputUrl);
+                  fetch('http://localhost:5001/api/hexapod/camera_url', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ streamUrl: inputUrl }),
+                  }).catch(() => {});
                   setShowUrlModal(false);
                 }}
                 className="px-4 py-2 rounded-xl bg-[#C85A32] text-white font-semibold"

@@ -127,6 +127,19 @@ export const HazardSimPage: React.FC = () => {
               </button>
 
               <button
+                onClick={() => triggerHazard('seismic')}
+                className="p-4 bg-[#FAF8F3] border border-[#E6DFD5] hover:border-[#B71C1C] rounded-xl text-left transition-all cursor-pointer"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#1F2421] text-xs">Seismic Tremor</span>
+                  <span className="text-[11px] text-[#B71C1C] font-mono font-bold">Mag 6.2</span>
+                </div>
+                <p className="text-xs text-[#6B685F] mt-1 font-medium">
+                  Triggers structural collapse warning & auto-evacuation.
+                </p>
+              </button>
+
+              <button
                 onClick={() => triggerHazard('helmet_off')}
                 className="p-4 bg-[#FAF8F3] border border-[#E6DFD5] hover:border-[#B8860B] rounded-xl text-left transition-all cursor-pointer"
               >

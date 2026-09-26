@@ -3,7 +3,7 @@ import { useDashboard } from '../context/DashboardContext';
 import { DashboardTab } from '../types';
 
 export const Header: React.FC = () => {
-  const { activeTab, setActiveTab, safetyScore, evacActive, sirenMuted, toggleSiren, alerts } = useDashboard();
+  const { activeTab, setActiveTab, safetyScore, evacActive, sirenMuted, toggleSiren, alerts, simulationRunning, toggleSimulation } = useDashboard();
   const [utcTime, setUtcTime] = useState<string>('');
 
   useEffect(() => {
@@ -92,6 +92,33 @@ export const Header: React.FC = () => {
           <span className={`w-2 h-2 rounded-full ${evacActive ? 'bg-[#B71C1C] animate-ping' : 'bg-[#2E7D32]'}`}></span>
           <span>{evacActive ? 'EVACUATION ACTIVE' : `SYSTEM NOMINAL · ${safetyScore}%`}</span>
         </div>
+
+        {/* Sensor Mode Toggle */}
+        <button
+          onClick={toggleSimulation}
+          title={simulationRunning ? 'Switch to Live Sensor Mode' : 'Switch to Simulated Mode'}
+          className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border font-['Plus_Jakarta_Sans'] text-xs font-bold tracking-wide transition-all cursor-pointer ${
+            simulationRunning 
+              ? 'bg-[#F8F6F0] border-[#E6DFD5] text-[#6B685F] hover:text-[#1F2421] hover:bg-white' 
+              : 'bg-[#C85A32]/10 border-[#C85A32]/35 text-[#C85A32]'
+          }`}
+        >
+          {simulationRunning ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+              <span>SIMULATION</span>
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><circle cx="12" cy="12" r="4"/>
+              </svg>
+              <span>LIVE SENSORS</span>
+            </>
+          )}
+        </button>
 
         {/* Siren Alert Toggle */}
         <button
